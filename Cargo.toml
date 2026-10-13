@@ -4,13 +4,14 @@ members = [
     "crates/seleniumbase-rs-plugin",
     "crates/seleniumbase-rs-plugin-testing",
     "plugins/block-resources",
+    "plugins/crx",
 ]
 exclude = ["template"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/MustCodeAl/seleniumbase-rs-plugins"
 

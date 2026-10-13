@@ -1,0 +1,16 @@
+[package]
+name = "seleniumbase-rs-plugin-crx"
+description = "A seleniumbase-rs plugin that loads packed Chrome extensions (.crx files)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+tempfile = "3.27"
+zip = { version = "9.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
