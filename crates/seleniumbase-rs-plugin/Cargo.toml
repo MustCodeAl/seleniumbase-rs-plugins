@@ -1,0 +1,16 @@
+[package]
+name = "seleniumbase-rs-plugin"
+description = "The plugin API of seleniumbase-rs: hooks that run when a browser starts, opens a tab and closes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true

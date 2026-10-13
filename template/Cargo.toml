@@ -1,0 +1,12 @@
+[package]
+name = "seleniumbase-rs-plugin-hello"
+description = "A seleniumbase-rs plugin (rename me)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+seleniumbase-rs-plugin = { git = "https://github.com/MustCodeAl/seleniumbase-rs-plugins" }
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing = { git = "https://github.com/MustCodeAl/seleniumbase-rs-plugins" }

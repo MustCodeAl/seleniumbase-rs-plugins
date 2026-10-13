@@ -1,0 +1,15 @@
+[package]
+name = "seleniumbase-rs-plugin-block-resources"
+description = "A seleniumbase-rs plugin that stops pages from loading images, fonts or media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true

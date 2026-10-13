@@ -1,0 +1,13 @@
+[package]
+name = "seleniumbase-rs-plugin-testing"
+description = "Recording fakes of the seleniumbase-rs plugin handles, to test a plugin without a browser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/seleniumbase-rs-plugin",
+    "crates/seleniumbase-rs-plugin-testing",
+    "plugins/block-resources",
+]
+exclude = ["template"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/MustCodeAl/seleniumbase-rs-plugins"
+
+[workspace.dependencies]
+seleniumbase-rs-plugin = { path = "crates/seleniumbase-rs-plugin" }
+seleniumbase-rs-plugin-testing = { path = "crates/seleniumbase-rs-plugin-testing" }
+async-trait = "0.1"
+serde_json = "1"
+thiserror = "2"
