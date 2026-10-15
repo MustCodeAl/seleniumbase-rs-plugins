@@ -5,6 +5,7 @@ members = [
     "crates/seleniumbase-rs-plugin-testing",
     "plugins/block-resources",
     "plugins/crx",
+    "plugins/wasm",
 ]
 exclude = ["template"]
 

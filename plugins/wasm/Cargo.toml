@@ -1,0 +1,23 @@
+[package]
+name = "seleniumbase-rs-plugin-wasm"
+description = "A seleniumbase-rs plugin host that runs plugins compiled to WebAssembly, sandboxed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["seleniumbase-rs", "plugin", "webassembly", "wasm", "sandbox"]
+categories = ["wasm", "development-tools::testing"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+wasmi = { version = "2", default-features = false, features = ["stable", "std", "validate", "auto-dispatch"] }
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
+tempfile = "3.27.0"
+wat = "1.262.0"
