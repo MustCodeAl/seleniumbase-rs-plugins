@@ -19,6 +19,7 @@ also examples of how to write one.
 |---|---|---|
 | [`block-resources`](plugins/block-resources) | Stops pages from loading images, fonts or media (faster, less data) | `cargo add seleniumbase-rs-plugin-block-resources --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 | [`crx`](plugins/crx) | Loads packed Chrome extensions (`.crx`, CRX3 and CRX2) | `cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`wasm`](plugins/wasm) | Runs plugins written in any language that compiles to WebAssembly, sandboxed with wasmi (no host imports, fuel and memory limits) | `cargo add seleniumbase-rs-plugin-wasm --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 
 The framework itself:
 
@@ -65,6 +66,11 @@ the tab instead of being skipped.
 2. Test it with `seleniumbase-rs-plugin-testing`: `RecordingPage` and
    `RecordingBrowser` record every command and script your hooks send.
 3. Publish it on GitHub with the topic `seleniumbase-rs-plugin` so people find it.
+
+Not a Rust programmer? Write the plugin in any language that compiles to
+WebAssembly and load it with the [`wasm`](plugins/wasm) host: the module only
+describes the plugin in JSON (a name, browser switches, page scripts, URLs to
+block) and runs in a sandbox. The ABI is in [its README](plugins/wasm/README.md).
 
 A plugin depends only on `seleniumbase-rs-plugin`, never on seleniumbase-rs, so
 it keeps working as seleniumbase-rs changes.
