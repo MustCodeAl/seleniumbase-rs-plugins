@@ -1,0 +1,34 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "seleniumbase-rs plugins",
+  "description": "Plugins for seleniumbase-rs, the Rust port of SeleniumBase browser automation: the seleniumbase-rs-plugin API (the Plugin trait with launch, browser, new-tab and close hooks, PluginSet, Package), recording test fakes, and plugins that block images and fonts, load packed .crx extensions, or run sandboxed WebAssembly plugins.",
+  "branch": "main",
+  "folders": ["plugins"],
+  "excludeFolders": [
+    "target",
+    "tests",
+    ".github",
+    ".claude"
+  ],
+  "excludeFiles": [
+    "CHANGELOG.md",
+    "ROADMAP.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "COPILOT.md",
+    "CONTRIBUTING.md",
+    "LICENSE"
+  ],
+  "rules": [
+    "These crates are not on crates.io: depend on them by git URL, for example cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins. They need Rust 1.88 and edition 2024.",
+    "seleniumbase-rs's plugins feature takes seleniumbase-rs-plugin from this git URL with no rev. Add plugin crates the same way, or Cargo builds two seleniumbase-rs-plugin crates and the Plugin trait does not match.",
+    "With seleniumbase-rs 0.3.0 or later, enable its plugins feature and pass the set to LaunchOptions::builder().plugins(set). The hooks run in the pure CDP engine (sb_cdp), not yet in BaseCase (WebDriver).",
+    "Implement Plugin from seleniumbase-rs-plugin (it re-exports async_trait): only name() is required; before_launch, on_browser, on_page_created and on_close are optional. A plugin crate depends on seleniumbase-rs-plugin, never on seleniumbase-rs.",
+    "PluginSet::new().with(plugin)? builds a set and refuses a duplicate name; plugins run in the order added, except those with Requirements::RUN_LAST. An error in before_launch, on_browser or on_page_created stops the launch or the tab.",
+    "Package::script, style, script_url and style_url load JavaScript or CSS into every tab. Each needs only_on([hosts]) or everywhere(), or the set refuses it; add integrity(hash) to a URL package.",
+    "A hook gets a dyn BrowserHandle or dyn PageHandle: send(method, params) issues a Chrome DevTools Protocol command, and a page also has add_init_script and evaluate. Requirements::CHROMIUM_ONLY refuses other browsers.",
+    "BlockResources::images_and_fonts(), media() or patterns([...]) blocks URLs and needs Chromium. CrxExtensions::new([paths]) loads .crx files into a Chromium browser the program starts and does not verify their signatures.",
+    "WasmPlugin::from_file or from_bytes loads a binary .wasm module (not WAT) once, in a wasmi sandbox with no imports. Limits defaults: 4 MiB module, 16 MiB memory, 20,000,000 fuel per call. The ABI is in plugins/wasm/README.md.",
+    "Test a plugin without a browser: add seleniumbase-rs-plugin-testing as a dev-dependency from the same git URL, run the set on a RecordingPage or RecordingBrowser with block_on, and compare page.calls() with Call values."
+  ]
+}
