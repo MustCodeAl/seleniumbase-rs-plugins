@@ -156,7 +156,7 @@ it describes then reaches three places, so review a module you did not write:
 
 ## An example in WAT
 
-[`examples/hello.wat`](examples/hello.wat) is a whole plugin: it is named
+[`examples/hello.wat`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/blob/main/plugins/wasm/examples/hello.wat) is a whole plugin: it is named
 `hello` and logs a line on `example.com`. The two strings sit in the data
 segments; each function returns the pointer in the high half and the length in
 the low half.

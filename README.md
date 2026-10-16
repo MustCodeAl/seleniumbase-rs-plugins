@@ -6,9 +6,11 @@ puppeteer-extra plugins do for Puppeteer. The design is
 [ADR 004](https://github.com/MustCodeAl/seleniumbase-rs/blob/main/docs/adr/004-plugin-framework.md).
 
 > [!NOTE]
-> Early. The API crate, the test fakes and the first plugin are here; the hook
-> points inside seleniumbase-rs come next, so plugins cannot be attached to a
-> browser yet.
+> Early. Plugins run in seleniumbase-rs 0.3.0 and later, behind its `plugins`
+> feature, in the pure CDP engine (`sb_cdp`); the WebDriver engine (`BaseCase`)
+> does not run them yet. The
+> [Browser Plugins guide](https://github.com/MustCodeAl/seleniumbase-rs/blob/main/docs/tutorials/plugins.md)
+> shows how to attach a set to a browser.
 
 ## Plugins you can install
 
@@ -17,17 +19,17 @@ also examples of how to write one.
 
 | Plugin | What it does | Install |
 |---|---|---|
-| [`block-resources`](plugins/block-resources) | Stops pages from loading images, fonts or media (faster, less data) | `cargo add seleniumbase-rs-plugin-block-resources --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
-| [`crx`](plugins/crx) | Loads packed Chrome extensions (`.crx`, CRX3 and CRX2) | `cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`block-resources`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/block-resources) | Stops pages from loading images, fonts or media (faster, less data) | `cargo add seleniumbase-rs-plugin-block-resources --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`crx`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/crx) | Loads packed Chrome extensions (`.crx`, CRX3 and CRX2) | `cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 | [`wasm`](plugins/wasm) | Runs plugins written in any language that compiles to WebAssembly, sandboxed with wasmi (no host imports, fuel and memory limits) | `cargo add seleniumbase-rs-plugin-wasm --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 
 The framework itself:
 
 | Crate | What it is | Install |
 |---|---|---|
-| [`seleniumbase-rs-plugin`](crates/seleniumbase-rs-plugin) | The API: `Plugin`, `PluginSet`, `LaunchSettings`, `Package`, the `BrowserHandle` and `PageHandle` traits | `cargo add seleniumbase-rs-plugin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
-| [`seleniumbase-rs-plugin-testing`](crates/seleniumbase-rs-plugin-testing) | Recording fakes of the handles, to test a plugin without a browser | `cargo add --dev seleniumbase-rs-plugin-testing --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
-| [`template`](template) | Start your own plugin from here | copy the folder |
+| [`seleniumbase-rs-plugin`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugin) | The API: `Plugin`, `PluginSet`, `LaunchSettings`, `Package`, the `BrowserHandle` and `PageHandle` traits | `cargo add seleniumbase-rs-plugin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`seleniumbase-rs-plugin-testing`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugin-testing) | Recording fakes of the handles, to test a plugin without a browser | `cargo add --dev seleniumbase-rs-plugin-testing --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`template`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/template) | Start your own plugin from here | copy the folder |
 
 More plugins live in their own repositories, such as
 [tauri-plugin-sbrs-automation](https://github.com/MustCodeAl/tauri-plugin-sbrs-automation).
@@ -61,7 +63,7 @@ the tab instead of being skipped.
 
 ## Write your own
 
-1. Copy [`template/`](template) and rename the crate to
+1. Copy [`template/`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/template) and rename the crate to
    `seleniumbase-rs-plugin-<name>`.
 2. Test it with `seleniumbase-rs-plugin-testing`: `RecordingPage` and
    `RecordingBrowser` record every command and script your hooks send.

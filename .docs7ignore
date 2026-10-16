@@ -1,0 +1,11 @@
+# The Docs7 site is made of the Markdown pages in docs.json. A deploy from
+# this folder uploads everything else too, so leave out the Rust workspace.
+target/
+crates/
+template/
+Cargo.toml
+Cargo.lock
+plugins/*/Cargo.toml
+plugins/*/src/
+plugins/*/tests/
+plugins/*/examples/

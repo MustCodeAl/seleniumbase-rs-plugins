@@ -1,0 +1,23 @@
+{
+  "$schema": "https://context7.com/schema/docs7.json",
+  "name": "SeleniumBase for Rust Plugins",
+  "colors": {
+    "primary": "#CE422B"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Documentation",
+        "pages": [
+          "README",
+          {
+            "group": "WebAssembly plugins",
+            "pages": [
+              "plugins/wasm/README"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
