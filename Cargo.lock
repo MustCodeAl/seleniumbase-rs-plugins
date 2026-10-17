@@ -242,6 +242,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs-plugin-shield"
+version = "0.1.2"
+dependencies = [
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-testing",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "seleniumbase-rs-plugin-testing"
 version = "0.1.2"
 dependencies = [

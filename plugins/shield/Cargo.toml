@@ -1,0 +1,17 @@
+[package]
+name = "seleniumbase-rs-plugin-shield"
+description = "A seleniumbase-rs plugin that turns off browser telemetry, WebRTC address leaks and third-party cookies"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "privacy", "chromium"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
