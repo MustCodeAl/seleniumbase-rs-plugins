@@ -138,7 +138,10 @@ mod tests {
         a.requires.push("b".to_owned());
         let mut b = node("b", Phase::Normal);
         b.requires.push("a".to_owned());
-        assert!(matches!(resolve(&[a.clone(), b]), Err(PluginError::Cycle(_))));
+        assert!(matches!(
+            resolve(&[a.clone(), b]),
+            Err(PluginError::Cycle(_))
+        ));
         assert!(matches!(
             resolve(&[a.clone()]),
             Err(PluginError::MissingDependency { .. })

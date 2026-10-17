@@ -19,15 +19,38 @@
 
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use seleniumbase_rs_plugin::{
-    LaunchSettings, Plugin, PluginError, Requirements, Result, async_trait,
+    Capability, Category, Configurable, LaunchSettings, Metadata, PathScope, Plugin, PluginError,
+    Requirements, Result, async_trait,
 };
 use tempfile::TempDir;
 
 /// Unpacked archives above this size are refused, as a guard against zip bombs.
 const MAX_UNPACKED: u64 = 512 * 1024 * 1024;
+
+impl Configurable for CrxExtensions {
+    const NAME: &'static str = "crx";
+
+    fn describe() -> Metadata {
+        Metadata::new(Category::Extension)
+            .version(env!("CARGO_PKG_VERSION"))
+            .summary("Loads .crx extension files into the browser it starts")
+            .capability(Capability::LaunchExtensions)
+            .capability(Capability::HostFsWrite(PathScope::Temp))
+    }
+
+    /// Options: `files`, an array of `.crx` paths.
+    fn configure(options: &serde_json::Value) -> Result<Self> {
+        let files = options
+            .get("files")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|items| items.iter().map(|v| v.as_str()).collect::<Option<Vec<_>>>())
+            .ok_or_else(|| PluginError::Config("`files` must be an array of paths".into()))?;
+        Ok(Self::new(files))
+    }
+}
 
 /// Loads `.crx` files into the browser it starts.
 #[derive(Debug)]
@@ -58,6 +81,18 @@ impl Plugin for CrxExtensions {
 
     fn requirements(&self) -> Requirements {
         Requirements::CHROMIUM_ONLY | Requirements::LAUNCH_ONLY
+    }
+
+    fn metadata(&self) -> Metadata {
+        Self::describe().capability(Capability::HostFsRead(PathScope::Declared(
+            self.files.clone(),
+        )))
+    }
+
+    /// A fresh instance for each browser, so closing one pooled browser does
+    /// not delete the unpacked folders of the others.
+    fn per_launch(&self) -> Option<Arc<dyn Plugin>> {
+        Some(Arc::new(Self::new(self.files.clone())))
     }
 
     async fn before_launch(&self, launch: &mut LaunchSettings) -> Result<()> {

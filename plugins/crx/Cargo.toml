@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 seleniumbase-rs-plugin.workspace = true
+serde_json.workspace = true
 tempfile = "3.27"
 zip = { version = "9.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 

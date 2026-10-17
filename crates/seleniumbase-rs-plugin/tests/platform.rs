@@ -99,14 +99,22 @@ fn categories_order_plugins_and_edges_refine_them() {
 #[test]
 fn requires_conflicts_and_cycles_stop_the_check() {
     let needs = PluginSet::new()
-        .with(p("a", Some(Metadata::new(Category::Core).requires("b")), nop))
+        .with(p(
+            "a",
+            Some(Metadata::new(Category::Core).requires("b")),
+            nop,
+        ))
         .unwrap();
     assert!(matches!(
         needs.check(&context()),
         Err(PluginError::MissingDependency { .. })
     ));
     let conflict = PluginSet::new()
-        .with(p("a", Some(Metadata::new(Category::Core).conflicts_with("b")), nop))
+        .with(p(
+            "a",
+            Some(Metadata::new(Category::Core).conflicts_with("b")),
+            nop,
+        ))
         .unwrap()
         .with(p("b", Some(Metadata::new(Category::Core)), nop))
         .unwrap();
@@ -115,11 +123,22 @@ fn requires_conflicts_and_cycles_stop_the_check() {
         Err(PluginError::Conflict { .. })
     ));
     let cycle = PluginSet::new()
-        .with(p("a", Some(Metadata::new(Category::Core).requires("b")), nop))
+        .with(p(
+            "a",
+            Some(Metadata::new(Category::Core).requires("b")),
+            nop,
+        ))
         .unwrap()
-        .with(p("b", Some(Metadata::new(Category::Core).requires("a")), nop))
+        .with(p(
+            "b",
+            Some(Metadata::new(Category::Core).requires("a")),
+            nop,
+        ))
         .unwrap();
-    assert!(matches!(cycle.check(&context()), Err(PluginError::Cycle(_))));
+    assert!(matches!(
+        cycle.check(&context()),
+        Err(PluginError::Cycle(_))
+    ));
 }
 
 #[test]
@@ -131,7 +150,10 @@ fn critical_capabilities_need_to_be_named() {
         Err(PluginError::Capability { .. })
     ));
     let trusted = PluginSet::new()
-        .with_trusted(p("raw", Some(meta()), nop), &[Capability::Raw(RawKind::Cdp)])
+        .with_trusted(
+            p("raw", Some(meta()), nop),
+            &[Capability::Raw(RawKind::Cdp)],
+        )
         .unwrap();
     trusted.check(&context()).unwrap();
     let granted = PluginSet::new()
@@ -178,13 +200,20 @@ fn strict_sets_refuse_legacy_plugins() {
 fn launch_changes_need_their_capability() {
     let meta = Metadata::new(Category::Environment).capability(Capability::LaunchArgs);
     let ok = PluginSet::new()
-        .with(p("ok", Some(meta.clone()), |l| l.args.push("--lang=de".into())))
+        .with(p("ok", Some(meta.clone()), |l| {
+            l.args.push("--lang=de".into())
+        }))
         .unwrap();
     assert_eq!(launch(&ok).unwrap().args, ["--lang=de"]);
     let proxy = PluginSet::new()
-        .with(p("proxy", Some(meta), |l| l.proxy = Some("http://x".into())))
+        .with(p("proxy", Some(meta), |l| {
+            l.proxy = Some("http://x".into())
+        }))
         .unwrap();
-    assert!(matches!(launch(&proxy), Err(PluginError::Capability { .. })));
+    assert!(matches!(
+        launch(&proxy),
+        Err(PluginError::Capability { .. })
+    ));
 }
 
 #[test]
@@ -194,17 +223,25 @@ fn refused_switches_are_refused_for_every_plugin_unless_trusted() {
             l.args.push("--host-resolver-rules=MAP * 1.2.3.4".into());
         }))
         .unwrap();
-    assert!(matches!(launch(&legacy), Err(PluginError::Capability { .. })));
+    assert!(matches!(
+        launch(&legacy),
+        Err(PluginError::Capability { .. })
+    ));
     let meta = || Metadata::new(Category::Core).capability(Capability::LaunchArgs);
     let features = PluginSet::new()
         .with(p("f", Some(meta()), |l| {
             l.disable_features.push("IsolateOrigins".into());
         }))
         .unwrap();
-    assert!(matches!(launch(&features), Err(PluginError::Capability { .. })));
+    assert!(matches!(
+        launch(&features),
+        Err(PluginError::Capability { .. })
+    ));
     let trusted = PluginSet::new()
         .with_trusted(
-            p("t", Some(meta()), |l| l.args.push("--js-flags=--foo".into())),
+            p("t", Some(meta()), |l| {
+                l.args.push("--js-flags=--foo".into())
+            }),
             &[Capability::Raw(RawKind::Switches)],
         )
         .unwrap();
@@ -237,10 +274,17 @@ fn a_sealed_field_keeps_its_value() {
     let other = p("other", Some(net(Seals::empty())), |l| {
         l.webrtc_policy = Some(WebRtcPolicy::Default);
     });
-    let conflicting = PluginSet::new().with(sealer("a")).unwrap().with(other).unwrap();
+    let conflicting = PluginSet::new()
+        .with(sealer("a"))
+        .unwrap()
+        .with(other)
+        .unwrap();
     assert!(matches!(
         launch(&conflicting),
-        Err(PluginError::Sealed { field: "webrtc_policy", .. })
+        Err(PluginError::Sealed {
+            field: "webrtc_policy",
+            ..
+        })
     ));
     let same = PluginSet::new()
         .with(sealer("a"))
@@ -313,7 +357,10 @@ impl Configurable for Hello {
 fn the_registry_builds_strict_sets_from_specs() {
     let registry = Registry::new().with(Descriptor::of::<Hello>());
     assert_eq!(registry.names(), ["hello"]);
-    assert_eq!(registry.get("hello").unwrap().metadata().summary, "says hello");
+    assert_eq!(
+        registry.get("hello").unwrap().metadata().summary,
+        "says hello"
+    );
     let set = registry
         .plugin_set(&[PluginSpec::new("hello").options(serde_json::json!({"greeting": "yo"}))])
         .unwrap();
@@ -324,8 +371,12 @@ fn the_registry_builds_strict_sets_from_specs() {
         Err(PluginError::Config(_))
     ));
     assert!(matches!(
-        registry.plugin_set(&[PluginSpec::new("hello").options(serde_json::json!({"greeting": 1}))]),
+        registry
+            .plugin_set(&[PluginSpec::new("hello").options(serde_json::json!({"greeting": 1}))]),
         Err(PluginError::Config(_))
     ));
-    assert_eq!(Hello::configure(&serde_json::Value::Null).unwrap().greeting, "hi");
+    assert_eq!(
+        Hello::configure(&serde_json::Value::Null).unwrap().greeting,
+        "hi"
+    );
 }

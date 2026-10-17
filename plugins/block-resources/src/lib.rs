@@ -13,7 +13,10 @@
 //! # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
 //! ```
 
-use seleniumbase_rs_plugin::{PageHandle, Plugin, Requirements, Result, async_trait};
+use seleniumbase_rs_plugin::{
+    Capability, Category, Configurable, Metadata, PageHandle, Plugin, PluginError, Requirements,
+    Result, async_trait,
+};
 use serde_json::json;
 
 const IMAGES: &[&str] = &[
@@ -67,6 +70,10 @@ impl Plugin for BlockResources {
         Requirements::CHROMIUM_ONLY
     }
 
+    fn metadata(&self) -> Metadata {
+        Self::describe()
+    }
+
     async fn on_page_created(&self, page: &dyn PageHandle) -> Result<()> {
         page.send("Network.enable", json!({})).await?;
         page.send("Network.setBlockedURLs", json!({ "urls": self.patterns }))
@@ -75,8 +82,57 @@ impl Plugin for BlockResources {
     }
 }
 
+impl Configurable for BlockResources {
+    const NAME: &'static str = "block-resources";
+
+    fn describe() -> Metadata {
+        Metadata::new(Category::Core)
+            .version(env!("CARGO_PKG_VERSION"))
+            .summary("Stops pages from loading images, fonts, media or URLs you name")
+            .capability(Capability::Cdp("Network".into()))
+    }
+
+    /// Options: `preset` (`"images-and-fonts"`, the default, or `"media"`) or
+    /// `patterns`, an array of URL patterns.
+    fn configure(options: &serde_json::Value) -> Result<Self> {
+        if let Some(patterns) = options.get("patterns") {
+            let list = patterns
+                .as_array()
+                .and_then(|items| items.iter().map(|v| v.as_str()).collect::<Option<Vec<_>>>())
+                .ok_or_else(|| {
+                    PluginError::Config("`patterns` must be an array of strings".into())
+                })?;
+            return Ok(Self::patterns(list));
+        }
+        match options.get("preset").and_then(serde_json::Value::as_str) {
+            None | Some("images-and-fonts") => Ok(Self::images_and_fonts()),
+            Some("media") => Ok(Self::media()),
+            Some(other) => Err(PluginError::Config(format!("unknown preset `{other}`"))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn it_configures_from_options_and_declares_its_category() {
+        use super::*;
+        use seleniumbase_rs_plugin::{BrowserFamily, Engine, LaunchContext, PluginSet};
+        let media = BlockResources::configure(&json!({"preset": "media"})).unwrap();
+        assert_eq!(media, BlockResources::media());
+        let custom = BlockResources::configure(&json!({"patterns": ["*://a/*"]})).unwrap();
+        assert_eq!(custom, BlockResources::patterns(["*://a/*"]));
+        assert!(BlockResources::configure(&json!({"preset": "x"})).is_err());
+        let set = PluginSet::strict().with(custom).unwrap();
+        set.check(&LaunchContext {
+            engine: Engine::Cdp,
+            family: BrowserFamily::Chromium,
+            headless: true,
+            connecting: false,
+        })
+        .unwrap();
+    }
+
     use super::*;
     use seleniumbase_rs_plugin::PluginSet;
     use seleniumbase_rs_plugin_testing::{Call, RecordingPage, block_on};

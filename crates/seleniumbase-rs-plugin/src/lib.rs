@@ -928,19 +928,30 @@ fn verify_launch(
         if entry.grants.covers(&capability) {
             Ok(())
         } else {
-            Err(denied(name, capability, "it changed a setting without the capability"))
+            Err(denied(
+                name,
+                capability,
+                "it changed a setting without the capability",
+            ))
         }
     };
     let grows = |field: &str, old: &[String], new: &[String]| -> Result<()> {
         if old.iter().all(|item| new.contains(item)) {
             Ok(())
         } else {
-            Err(denied(name, field, "list settings only grow; it removed an entry"))
+            Err(denied(
+                name,
+                field,
+                "list settings only grow; it removed an entry",
+            ))
         }
     };
     let raw_switches = entry.grants.covers(&Capability::Raw(RawKind::Switches));
     let added = |old: &[String], new: &[String]| -> Vec<String> {
-        new.iter().filter(|item| !old.contains(item)).cloned().collect()
+        new.iter()
+            .filter(|item| !old.contains(item))
+            .cloned()
+            .collect()
     };
 
     grows("args", &before.args, &after.args)?;
@@ -956,15 +967,31 @@ fn verify_launch(
         }
     }
     for (field, old, new) in [
-        ("disable_features", &before.disable_features, &after.disable_features),
-        ("enable_features", &before.enable_features, &after.enable_features),
+        (
+            "disable_features",
+            &before.disable_features,
+            &after.disable_features,
+        ),
+        (
+            "enable_features",
+            &before.enable_features,
+            &after.enable_features,
+        ),
     ] {
         grows(field, old, new)?;
         let new_features = added(old, new);
         if !new_features.is_empty() {
             need(Capability::LaunchArgs)?;
-            if !raw_switches && new_features.iter().any(|f| switch_policy::feature_refused(f)) {
-                return Err(denied(name, field, "that feature may not be changed by a plugin"));
+            if !raw_switches
+                && new_features
+                    .iter()
+                    .any(|f| switch_policy::feature_refused(f))
+            {
+                return Err(denied(
+                    name,
+                    field,
+                    "that feature may not be changed by a plugin",
+                ));
             }
         }
     }
@@ -981,12 +1008,24 @@ fn verify_launch(
     }
     if before.prefs != after.prefs {
         if !before.prefs.keys().all(|key| after.prefs.contains_key(key)) {
-            return Err(denied(name, "prefs", "it removed a preference another plugin set"));
+            return Err(denied(
+                name,
+                "prefs",
+                "it removed a preference another plugin set",
+            ));
         }
         need(Capability::LaunchPrefs)?;
     }
-    let old_ext: Vec<String> = before.extensions.iter().map(|p| p.display().to_string()).collect();
-    let new_ext: Vec<String> = after.extensions.iter().map(|p| p.display().to_string()).collect();
+    let old_ext: Vec<String> = before
+        .extensions
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+    let new_ext: Vec<String> = after
+        .extensions
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
     grows("extensions", &old_ext, &new_ext)?;
     if old_ext != new_ext {
         need(Capability::LaunchExtensions)?;
@@ -998,12 +1037,21 @@ fn verify_launch(
         need(Capability::LaunchProxy)?;
     }
     if before.profile != after.profile {
-        return Err(denied(name, "profile", "the profile is read-only for plugins"));
+        return Err(denied(
+            name,
+            "profile",
+            "the profile is read-only for plugins",
+        ));
     }
 
     // Seals on scalar fields.
     let scalars: [(&'static str, Seals, bool, String); 3] = [
-        ("proxy", Seals::PROXY, before.proxy != after.proxy, format!("{:?}", after.proxy)),
+        (
+            "proxy",
+            Seals::PROXY,
+            before.proxy != after.proxy,
+            format!("{:?}", after.proxy),
+        ),
         (
             "webrtc_policy",
             Seals::WEBRTC,

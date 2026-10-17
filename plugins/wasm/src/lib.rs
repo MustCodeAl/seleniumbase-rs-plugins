@@ -13,7 +13,8 @@ use std::io::Read;
 use std::path::Path;
 
 use seleniumbase_rs_plugin::{
-    LaunchSettings, Package, PageHandle, Plugin, Requirements, Result, async_trait,
+    Capability, Category, HostScope, LaunchSettings, Metadata, Package, PageHandle, Plugin,
+    Requirements, Result, async_trait,
 };
 use serde_json::json;
 
@@ -135,6 +136,22 @@ impl Plugin for WasmPlugin {
             // Blocking URLs uses the DevTools Protocol.
             Requirements::CHROMIUM_ONLY
         }
+    }
+
+    fn metadata(&self) -> Metadata {
+        let mut meta = Metadata::new(Category::Environment)
+            .version(env!("CARGO_PKG_VERSION"))
+            .summary("A sandboxed WebAssembly module");
+        if !self.launch_args.is_empty() {
+            meta = meta.capability(Capability::LaunchArgs);
+        }
+        if !self.blocked_urls.is_empty() {
+            meta = meta.capability(Capability::Cdp("Network".into()));
+        }
+        if !self.packages.is_empty() {
+            meta = meta.capability(Capability::PageScript(HostScope::Everywhere));
+        }
+        meta
     }
 
     fn packages(&self) -> Vec<Package> {
