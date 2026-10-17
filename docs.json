@@ -15,6 +15,12 @@
             "pages": [
               "plugins/wasm/README"
             ]
+          },
+          {
+            "group": "Design",
+            "pages": [
+              "docs/adr/0001-plugin-architecture"
+            ]
           }
         ]
       }

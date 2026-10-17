@@ -82,6 +82,15 @@ it keeps working as seleniumbase-rs changes.
 > cookie and password the browser handles. Review a plugin before you add it,
 > as you would any dependency.
 
+## Design
+
+- [ADR 004: the plugin framework](https://github.com/MustCodeAl/seleniumbase-rs/blob/main/docs/adr/004-plugin-framework.md):
+  the current `Plugin` trait, hooks and `PluginSet`.
+- [Plugin architecture (ADR 005, proposed)](docs/adr/0001-plugin-architecture.md):
+  the next platform version, with capabilities, five categories, built-in
+  plugins in the prebuilt binaries, a plugin store and WASM ABI 2. It targets
+  seleniumbase-rs 0.5.0.
+
 ## License
 
 MIT.
