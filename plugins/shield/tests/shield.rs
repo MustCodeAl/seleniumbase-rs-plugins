@@ -38,7 +38,8 @@ fn defaults_match_the_design() {
     assert!(config.block_third_party_cookies);
     assert!(config.ephemeral_profile);
     assert!(!config.sweep_stale_profiles);
-    assert!(config.clear_between_tests);
+    // Off until the hooks it needs exist: a default must not promise what is not done.
+    assert!(!config.clear_between_tests);
     assert!(config.extra_block_hosts.is_empty());
     assert!(config.safe_browsing);
 }
@@ -84,6 +85,23 @@ fn a_wrong_value_is_refused() {
         assert!(
             matches!(error, PluginError::Config(_)),
             "{options}: {error:?}"
+        );
+    }
+}
+
+#[test]
+fn the_options_that_do_nothing_yet_are_refused_when_turned_on() {
+    for option in ["sweep_stale_profiles", "clear_between_tests"] {
+        let error = Shield::configure(&json!({ option: true })).unwrap_err();
+        assert!(
+            matches!(error, PluginError::Config(_)),
+            "{option}: {error:?}"
+        );
+        assert!(error.to_string().contains(option), "{error}");
+        // Off is the same as not saying it.
+        assert_eq!(
+            shield(&json!({ option: false })).config(),
+            &ShieldConfig::default()
         );
     }
 }
@@ -187,10 +205,8 @@ fn the_registry_builds_it_by_name() {
 
 #[test]
 fn a_pooled_browser_gets_its_own_instance() {
+    // That the fresh instance starts with no origins is a unit test in `src/lib.rs`.
     let shield = shield(&Value::Null);
-    shield.remember_origin("https://a.example/");
-    let fresh = shield.per_launch().expect("a fresh instance");
-    assert_eq!(fresh.name(), "shield");
     let set = PluginSet::strict().with(shield).unwrap();
     assert_eq!(set.for_launch().names(), ["shield"]);
 }
@@ -265,7 +281,9 @@ fn basic_sets_switches_features_prefs_and_the_webrtc_policy_but_no_host_rules() 
     }
     // 1 is CookieControlsMode::kBlockThirdParty.
     assert_eq!(launch.prefs["profile.cookie_controls_mode"], json!(1));
-    // Basic never touches Safe Browsing, and it does not set the proxy or headless mode.
+    // Basic sets no Safe Browsing preference or rule (what Chromium's own
+    // `--disable-background-networking` does to it is not verified), and it does not set the
+    // proxy or headless mode.
     assert!(!launch.prefs.contains_key("safebrowsing.enabled"));
     assert_eq!(launch.proxy, None);
     assert!(!launch.headless);
@@ -286,14 +304,14 @@ fn strict_adds_one_resolver_rule_per_browser_host() {
             .iter()
             .all(|r| !r.contains("safebrowsing"))
     );
-    // The rules are all the plugin may say about host resolution.
-    let switch = format!(
-        "--host-resolver-rules={}",
-        launch.host_resolver_rules.join(",")
-    );
+    // The rules go through the structured field; the plugin never writes the raw switch.
     assert!(
-        switch_policy::refusal(&switch).is_some(),
-        "the host joins them, a plugin may not"
+        launch
+            .args
+            .iter()
+            .all(|a| !a.starts_with("--host-resolver-rules")),
+        "{:?}",
+        launch.args
     );
 }
 
@@ -395,10 +413,61 @@ fn a_tab_blocks_the_extra_hosts_through_the_raw_protocol() {
             Call::Send("Network.enable".into(), json!({})),
             Call::Send(
                 "Network.setBlockedURLs".into(),
-                json!({ "urls": ["*://tracker.example.com/*", "*://*.tracker.example.com/*"] })
+                json!({ "urls": [
+                    "*://tracker.example.com/*",
+                    "*://*.tracker.example.com/*",
+                    "*://tracker.example.com:*/*",
+                    "*://*.tracker.example.com:*/*",
+                ] })
             ),
         ]
     );
+}
+
+/// `*` matches any run of characters, as in a `Network.setBlockedURLs` pattern.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    match pattern.split_once('*') {
+        None => pattern == text,
+        Some((head, tail)) => text.strip_prefix(head).is_some_and(|rest| {
+            (0..=rest.len())
+                .filter(|i| rest.is_char_boundary(*i))
+                .any(|i| wildcard_match(tail, &rest[i..]))
+        }),
+    }
+}
+
+#[test]
+fn the_block_patterns_cover_ports_and_subdomains_but_not_look_alikes() {
+    let page = RecordingPage::new();
+    let shield = shield(&json!({ "extra_block_hosts": ["tracker.example.com"] }));
+    block_on(shield.on_page_created(&page)).unwrap();
+    let Some(Call::Send(_, params)) = page.calls().pop() else {
+        panic!("no blocked-URL command");
+    };
+    let patterns: Vec<String> = params["urls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap().to_owned())
+        .collect();
+    let blocked = |url: &str| patterns.iter().any(|p| wildcard_match(p, url));
+    for url in [
+        "https://tracker.example.com/x",
+        "http://tracker.example.com/",
+        "https://tracker.example.com:8443/x",
+        "https://a.b.tracker.example.com/x",
+        "https://cdn.tracker.example.com:8443/x?y=1",
+        "wss://tracker.example.com:9000/socket",
+    ] {
+        assert!(blocked(url), "{url}");
+    }
+    for url in [
+        "https://nottracker.example.com/x",
+        "https://nottracker.example.com:8443/x",
+        "https://example.com/tracker.example.com/",
+    ] {
+        assert!(!blocked(url), "{url}");
+    }
 }
 
 #[test]
@@ -448,10 +517,38 @@ fn origins_are_remembered_without_paths_or_credentials() {
 }
 
 #[test]
+fn an_origin_has_one_spelling_whatever_the_default_port() {
+    let shield = shield(&Value::Null);
+    for url in [
+        "https://example.com:443/",
+        "https://example.com/",
+        "HTTPS://EXAMPLE.COM:443",
+        "http://example.com:80/x",
+        "http://example.com/",
+        "http://example.com:8080/",
+        // An empty port is the default port.
+        "https://example.com:/",
+    ] {
+        shield.remember_origin(url);
+    }
+    assert_eq!(
+        shield.take_origins(),
+        [
+            "http://example.com",
+            "http://example.com:8080",
+            "https://example.com",
+        ]
+    );
+}
+
+#[test]
 fn the_origin_list_is_bounded() {
     let shield = shield(&Value::Null);
     for i in 0..5_000 {
         shield.remember_origin(&format!("https://h{i}.example/"));
     }
+    assert!(shield.dropped_origins() >= 5_000 - 1_024);
     assert!(shield.take_origins().len() <= 1_024);
+    // Taking the origins starts the count again.
+    assert_eq!(shield.dropped_origins(), 0);
 }

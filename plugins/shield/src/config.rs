@@ -36,10 +36,11 @@ pub enum WebRtcMode {
 /// An option that is not listed here is an error, so a typo does not turn a
 /// protection off without a word.
 ///
-/// Two options are accepted now but do nothing yet, because the hooks they
-/// need are not part of the plugin API yet: [`sweep_stale_profiles`] and
-/// [`clear_between_tests`]. They are kept so a config written today keeps
-/// working when the hooks arrive.
+/// Two options do nothing yet, because the hooks they need are not part of the
+/// plugin API yet: [`sweep_stale_profiles`] and [`clear_between_tests`]. Both
+/// default to `false`, and turning either on is a [`PluginError::Config`]
+/// error until the hooks exist, so no one believes a protection is running
+/// that is not.
 ///
 /// [`sweep_stale_profiles`]: Self::sweep_stale_profiles
 /// [`clear_between_tests`]: Self::clear_between_tests
@@ -59,18 +60,21 @@ pub struct ShieldConfig {
     pub ephemeral_profile: bool,
     /// Delete the profile folders of dead browsers that earlier runs left in
     /// the temporary folder. Default `false`. **Not active yet**: it needs a
-    /// host file API that the plugin API does not have.
+    /// host file API that the plugin API does not have, so `true` is refused.
     pub sweep_stale_profiles: bool,
     /// Clear the storage of every origin a test visited when the test ends.
-    /// Default `true`. **Not active yet**: it needs the test hooks and the
-    /// response hook of a later plugin API.
+    /// Default `false` (the design's default is `true`; it changes when this
+    /// works). **Not active yet**: it needs the test hooks and the response hook
+    /// of a later plugin API, so `true` is refused.
     pub clear_between_tests: bool,
     /// Host names whose requests pages may not make, with their subdomains,
     /// such as `tracker.example.com`. Host names only: no scheme, port, path or
     /// `*`.
     pub extra_block_hosts: Vec<String>,
-    /// Leave Safe Browsing on. Default `true`. Only `false` turns it off, and
-    /// nothing else does, a [`Level`] included.
+    /// Leave Safe Browsing on. Default `true`. Only `false` makes shield turn
+    /// it off. No [`Level`] sets a Safe Browsing preference or blocks its hosts;
+    /// what Chromium's own `--disable-background-networking` does to Safe
+    /// Browsing list updates was not checked.
     pub safe_browsing: bool,
 }
 
@@ -82,7 +86,7 @@ impl Default for ShieldConfig {
             block_third_party_cookies: true,
             ephemeral_profile: true,
             sweep_stale_profiles: false,
-            clear_between_tests: true,
+            clear_between_tests: false,
             extra_block_hosts: Vec::new(),
             safe_browsing: true,
         }
@@ -148,8 +152,20 @@ impl ShieldConfig {
     /// # Errors
     ///
     /// [`PluginError::Config`] when a host name in `extra_block_hosts` is not a
-    /// plain ASCII host name.
+    /// plain ASCII host name, or when `sweep_stale_profiles` or
+    /// `clear_between_tests` is on (they are not implemented yet).
     pub(crate) fn normalized(mut self) -> Result<Self, PluginError> {
+        for (name, on) in [
+            ("sweep_stale_profiles", self.sweep_stale_profiles),
+            ("clear_between_tests", self.clear_between_tests),
+        ] {
+            if on {
+                return Err(PluginError::Config(format!(
+                    "shield: `{name}` is not implemented yet (the plugin API has no hook for it); \
+                     leave it off"
+                )));
+            }
+        }
         for host in &mut self.extra_block_hosts {
             *host = normalize_host(host)?;
         }
