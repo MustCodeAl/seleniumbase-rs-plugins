@@ -748,7 +748,7 @@ impl Plugin for Shield {
         for (key, value) in prefs::for_config(&self.cfg) { l.prefs.insert(key.into(), value); }
         if self.cfg.webrtc != WebRtcMode::Off { l.webrtc_policy = Some(WebRtcPolicy::DisableNonProxiedUdp); }
         if self.cfg.level == Level::Strict {                                     // browser-process hosts never reach setBlockedURLs
-            l.host_resolver_rules.extend(telemetry::BROWSER_HOSTS.iter().map(|h| format!("MAP {h} ~NOTFOUND")));
+            l.host_resolver_rules.extend(telemetry::BROWSER_HOSTS.iter().map(|h| format!("MAP {h} ^NOTFOUND")));
         }
         Ok(())
     }
@@ -826,7 +826,7 @@ impl Plugin for Tor {
         health::check(&self.cfg).await?;                                  // fail closed: the browser never starts
         let fwd = Forwarder::start(self.cfg.socks, IsolationToken::random()?, FwdLimits::default()).await?;
         l.proxy = Some(format!("socks5://{}", fwd.local_addr()));         // names go to Tor unresolved
-        l.host_resolver_rules.push("MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost".into()); // no local DNS
+        l.host_resolver_rules.push("MAP * ^NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost".into()); // no local DNS
         l.disable_quic = true;
         l.webrtc_policy = Some(WebRtcPolicy::DisableNonProxiedUdp);
         l.prefs.insert("net.network_prediction_options".into(), json!(2));

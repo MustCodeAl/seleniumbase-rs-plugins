@@ -24,15 +24,15 @@ also examples of how to write one.
 |---|---|---|
 | [`block-resources`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/block-resources) | Stops pages from loading images, fonts or media (faster, less data) | `cargo add seleniumbase-rs-plugin-block-resources --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 | [`crx`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/crx) | Loads packed Chrome extensions (`.crx`, CRX3 and CRX2) | `cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
-| [`shield`](plugins/shield) | Privacy hardening for Chromium: turns off the browser's own telemetry, WebRTC address leaks and third-party cookies, and refuses a persistent profile | `cargo add seleniumbase-rs-plugin-shield --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
-| [`wasm`](plugins/wasm) | Runs plugins written in any language that compiles to WebAssembly, sandboxed with wasmi (no host imports, fuel and memory limits) | `cargo add seleniumbase-rs-plugin-wasm --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`shield`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/shield) | Privacy hardening for Chromium: turns off the browser's own telemetry, WebRTC address leaks and third-party cookies, and refuses a persistent profile | `cargo add seleniumbase-rs-plugin-shield --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`wasm`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/wasm) | Runs plugins written in any language that compiles to WebAssembly, sandboxed with wasmi (no host imports, fuel and memory limits) | `cargo add seleniumbase-rs-plugin-wasm --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 
 The framework itself:
 
 | Crate | What it is | Install |
 |---|---|---|
 | [`seleniumbase-rs-plugin`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugin) | The API: `Plugin`, `PluginSet`, `LaunchSettings`, `Package`, the `BrowserHandle` and `PageHandle` traits | `cargo add seleniumbase-rs-plugin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
-| [`seleniumbase-rs-plugins-builtin`](crates/seleniumbase-rs-plugins-builtin) | The built-in plugins behind one cargo feature each (`shield`, `block-resources`, `crx`), and `registry()`, a registry of the enabled ones that builds a plugin from its name and options | `cargo add seleniumbase-rs-plugins-builtin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins --features shield` |
+| [`seleniumbase-rs-plugins-builtin`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugins-builtin) | The built-in plugins behind one cargo feature each (`shield`, `block-resources`, `crx`), and `registry()`, a registry of the enabled ones that builds a plugin from its name and options | `cargo add seleniumbase-rs-plugins-builtin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins --features shield` |
 | [`seleniumbase-rs-plugin-testing`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugin-testing) | Recording fakes of the handles, to test a plugin without a browser | `cargo add --dev seleniumbase-rs-plugin-testing --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 | [`template`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/template) | Start your own plugin from here | copy the folder |
 
@@ -45,7 +45,8 @@ Search GitHub for the topic `seleniumbase-rs-plugin` to find community ones.
 `seleniumbase-rs-plugins-builtin` has one feature per plugin and none on by
 default, so a build compiles only what it asks for. `registry()` returns a
 `Registry` of the plugins that are on; the registry builds a plugin from its name
-and options, and refuses an option it does not know:
+and options. A plugin that denies unknown options, as `shield` does, makes the
+registry refuse an option it does not know (check that of each plugin):
 
 ```rust
 use seleniumbase_rs_plugins_builtin::{registry, PluginSpec};
@@ -67,10 +68,13 @@ Options (`[plugins.shield]`): `level` (`basic` or `strict`), `webrtc` (`off`,
 `extra_block_hosts`, `safe_browsing`. The browser switches, features and hosts it
 uses were checked against the Chromium source; the list and its sources are in
 [`plugins/shield/src/telemetry.rs`](plugins/shield/src/telemetry.rs). Two options,
-`clear_between_tests` and `sweep_stale_profiles`, are accepted but do nothing
-yet: they need hooks that the plugin API does not have. `relay-only` (the
-default) forces relay candidates, so WebRTC calls between peers without a TURN
-server do not connect; use `policy` if you need them.
+`clear_between_tests` and `sweep_stale_profiles`, do nothing yet because they
+need hooks that the plugin API does not have: they default to `false`, and
+`true` is a configuration error until they work. `relay-only` (the default)
+forces relay candidates, so WebRTC calls between peers without a TURN server do
+not connect; use `policy` if you need them. `strict` makes the browser unable to
+resolve a few Google hosts, and pages cannot reach them either. More in the
+[shield README](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/shield).
 
 ## A plugin
 

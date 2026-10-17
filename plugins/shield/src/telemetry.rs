@@ -48,8 +48,18 @@ pub const FEATURES: &[&str] = &["OptimizationHints", "MediaRouter"];
 
 /// Hosts the browser process itself reports to or fetches from. At the
 /// [`Strict`](crate::Level::Strict) level the browser can no longer resolve
-/// them. Pages never reach this list: a request a page makes goes through the
-/// page's own blocking, not through the browser's resolver rules.
+/// them.
+///
+/// The block is made in the network stack (`--host-resolver-rules`), so it
+/// covers every request the browser makes to these hosts, **page requests
+/// included**: a page that loads something from one of them fails too. Two of
+/// the hosts are shared with things you may use:
+///
+/// - `clients2.google.com` also serves Chrome Web Store and extension update
+///   downloads, besides the time service, so extensions are not updated or
+///   installed from the store at `strict`.
+/// - `clients4.google.com` is also a connectivity-check host, besides the sync
+///   server, so a check that uses it reports no connection.
 ///
 /// Sources (the URL constant, in the Chromium tree):
 ///
