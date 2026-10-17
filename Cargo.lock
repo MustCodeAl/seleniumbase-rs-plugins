@@ -275,6 +275,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs-plugins-builtin"
+version = "0.1.2"
+dependencies = [
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-block-resources",
+ "seleniumbase-rs-plugin-crx",
+ "seleniumbase-rs-plugin-shield",
+ "seleniumbase-rs-plugin-testing",
+ "serde_json",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"

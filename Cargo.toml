@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/seleniumbase-rs-plugin",
     "crates/seleniumbase-rs-plugin-testing",
+    "crates/seleniumbase-rs-plugins-builtin",
     "plugins/block-resources",
     "plugins/crx",
     "plugins/shield",

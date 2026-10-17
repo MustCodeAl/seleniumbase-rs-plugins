@@ -1,0 +1,27 @@
+[package]
+name = "seleniumbase-rs-plugins-builtin"
+description = "The built-in seleniumbase-rs plugins behind one feature each, and a registry of the enabled ones"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "registry"]
+
+[features]
+# Nothing is on by default: seleniumbase-rs turns on the plugins a build wants,
+# so a build with `plugin-shield` does not also compile the CRX unpacker.
+default = []
+shield = ["dep:seleniumbase-rs-plugin-shield"]
+block-resources = ["dep:seleniumbase-rs-plugin-block-resources"]
+crx = ["dep:seleniumbase-rs-plugin-crx"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+seleniumbase-rs-plugin-shield = { workspace = true, optional = true }
+seleniumbase-rs-plugin-block-resources = { workspace = true, optional = true }
+seleniumbase-rs-plugin-crx = { workspace = true, optional = true }
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
+serde_json.workspace = true
