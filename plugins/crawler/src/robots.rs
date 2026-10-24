@@ -95,7 +95,7 @@ impl Robots {
         let agent = agent.to_ascii_lowercase();
         let mut chosen: Vec<&Group> = groups
             .iter()
-            .filter(|g| g.agents.iter().any(|a| *a == agent))
+            .filter(|g| g.agents.contains(&agent))
             .collect();
         if chosen.is_empty() {
             chosen = groups

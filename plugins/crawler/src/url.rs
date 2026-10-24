@@ -32,12 +32,9 @@ impl WebUrl {
         {
             return None;
         }
-        let (https, rest) = if let Some(rest) = strip_scheme(url, "https://") {
-            (true, rest)
-        } else if let Some(rest) = strip_scheme(url, "http://") {
-            (false, rest)
-        } else {
-            return None;
+        let (https, rest) = match strip_scheme(url, "https://") {
+            Some(rest) => (true, rest),
+            None => (false, strip_scheme(url, "http://")?),
         };
         let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
         let (authority, tail) = rest.split_at(end);
