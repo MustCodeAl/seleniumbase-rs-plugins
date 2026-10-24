@@ -119,6 +119,7 @@
 
 mod capability;
 mod context;
+mod guard;
 
 mod panic;
 
@@ -141,6 +142,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 pub use async_trait::async_trait;
+use guard::Scope;
 use serde_json::Value;
 
 pub use capability::{
@@ -150,6 +152,7 @@ pub use capability::{
 pub use config::{Configurable, Descriptor, PluginSpec, Registry};
 pub use context::{BrowserId, ContextHandle, ContextId, ContextSettings, LoadedExtension, PageId};
 
+pub use guard::{Guarded, cdp_policy};
 pub use host::{HostInfo, HostKind};
 pub use nav::{MAX_REDIRECTS, NavDecision, NavOrigin, NavOutcome, Navigation};
 pub use network::{
@@ -1239,8 +1242,14 @@ impl PluginSet {
     /// The first hook error, as [`PluginError::Hook`].
     pub async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
         for entry in self.ordered() {
-            self.run_hook(entry, "on_browser", entry.plugin.on_browser(browser))
-                .await?;
+            self.run_hook(
+                entry,
+                "on_browser",
+                entry
+                    .plugin
+                    .on_browser(&self.guard_browser(entry, Scope::Free, browser)),
+            )
+            .await?;
         }
         Ok(())
     }
@@ -1259,8 +1268,16 @@ impl PluginSet {
                     .await
                     .map_err(|error| in_hook(plugin.as_ref(), "packages", error))?;
             }
-            self.run_hook(entry, "on_page_created", plugin.on_page_created(page))
-                .await?;
+            self.run_hook(
+                entry,
+                "on_page_created",
+                plugin.on_page_created(&self.guard_page(
+                    entry,
+                    Scope::Hook("on_page_created"),
+                    page,
+                )),
+            )
+            .await?;
         }
         Ok(())
     }
@@ -1483,7 +1500,13 @@ impl PluginSet {
         let mut failures = Vec::new();
         for entry in self.ordered() {
             if let Err(error) = self
-                .run_hook(entry, "before_close", entry.plugin.before_close(browser))
+                .run_hook(
+                    entry,
+                    "before_close",
+                    entry
+                        .plugin
+                        .before_close(&self.guard_browser(entry, Scope::Free, browser)),
+                )
                 .await
             {
                 failures.push(error);

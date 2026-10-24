@@ -79,10 +79,7 @@ fn a_module_with_every_export_becomes_a_working_plugin() {
             Call::InitScript(demo.init_script().unwrap()),
             Call::InitScript(all.init_script().unwrap()),
             Call::Send("Network.enable".into(), json!({})),
-            Call::Send(
-                "Network.setBlockedURLs".into(),
-                json!({ "urls": ["*.png", "*://ads.example.com/*"] })
-            ),
+            Call::BlockUrls(vec!["*.png".into(), "*://ads.example.com/*".into()]),
         ]
     );
 
@@ -172,7 +169,7 @@ fn a_plugin_from_a_module_joins_a_set_like_any_other() {
 fn a_failing_command_names_the_plugin_and_the_hook() {
     let module = Module::named("blocker").json("sbrs_blocked_urls", r#"["*.png"]"#);
     let set = PluginSet::new().with(load(&module).unwrap()).unwrap();
-    let page = RecordingPage::new().failing("Network.setBlockedURLs");
+    let page = RecordingPage::new().failing("block_urls");
     let error = block_on(set.on_page_created(&page))
         .unwrap_err()
         .to_string();

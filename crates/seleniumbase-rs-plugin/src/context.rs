@@ -181,7 +181,11 @@ impl PluginSet {
             self.run_hook(
                 entry,
                 "on_context_created",
-                entry.plugin.on_context_created(context),
+                entry.plugin.on_context_created(&self.guard_context(
+                    entry,
+                    crate::Scope::Hook("on_context_created"),
+                    context,
+                )),
             )
             .await?;
         }

@@ -92,7 +92,13 @@ impl PluginSet {
                 .run_hook(
                     entry,
                     "on_test_end",
-                    entry.plugin.on_test_end(test, outcome, page),
+                    entry.plugin.on_test_end(
+                        test,
+                        outcome,
+                        page.map(|page| self.guard_page(entry, crate::Scope::Free, page))
+                            .as_ref()
+                            .map(|guarded| guarded as &dyn PageHandle),
+                    ),
                 )
                 .await
             {

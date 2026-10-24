@@ -624,7 +624,10 @@ impl PluginSet {
                 .run_hook(
                     entry,
                     "on_protocol_event",
-                    entry.plugin.on_protocol_event(browser, event),
+                    entry.plugin.on_protocol_event(
+                        &self.guard_browser(entry, crate::Scope::Free, browser),
+                        event,
+                    ),
                 )
                 .await
             {

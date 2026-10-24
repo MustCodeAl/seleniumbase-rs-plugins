@@ -7,6 +7,7 @@
 //! up in [`Plugin::on_request`](crate::Plugin::on_request) with
 //! [`RequestView::navigation`](crate::RequestView::navigation) set.
 
+use crate::Scope;
 use crate::{Capability, PageHandle, PluginError, PluginSet, Result};
 
 /// The most redirects plugins may apply to one navigation.
@@ -144,7 +145,10 @@ impl PluginSet {
                 .run_hook(
                     entry,
                     "before_navigate",
-                    entry.plugin.before_navigate(page, &current),
+                    entry.plugin.before_navigate(
+                        &self.guard_page(entry, Scope::BeforeNavigate, page),
+                        &current,
+                    ),
                 )
                 .await?;
             let name = entry.plugin.name();
@@ -201,7 +205,10 @@ impl PluginSet {
                 .run_hook(
                     entry,
                     "after_navigate",
-                    entry.plugin.after_navigate(page, outcome),
+                    entry.plugin.after_navigate(
+                        &self.guard_page(entry, Scope::Hook("after_navigate"), page),
+                        outcome,
+                    ),
                 )
                 .await
             {

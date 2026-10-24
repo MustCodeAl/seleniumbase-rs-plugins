@@ -45,11 +45,13 @@ fn set() -> PluginSet {
 fn a_0_1_0_plugin_still_runs_its_hooks() {
     let page = RecordingPage::new();
     block_on(set().on_page_created(&page)).unwrap();
+    // The guard turns the plugin's raw `Network.setBlockedURLs` into `block_urls`,
+    // so that the host keeps one list for the tab instead of the last one sent.
     assert_eq!(
         page.calls(),
         [
             Call::Send("Network.enable".into(), json!({})),
-            Call::Send("Network.setBlockedURLs".into(), json!({"urls": ["*.png"]})),
+            Call::BlockUrls(vec!["*.png".into()]),
         ]
     );
     set()

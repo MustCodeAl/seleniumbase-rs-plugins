@@ -144,21 +144,19 @@ mod tests {
             .with(BlockResources::patterns(["*.png"]))
             .unwrap();
         block_on(set.on_page_created(&page)).unwrap();
+        // The guard turns the raw `Network.setBlockedURLs` into `block_urls`.
         assert_eq!(
             page.calls(),
             [
                 Call::Send("Network.enable".into(), json!({})),
-                Call::Send(
-                    "Network.setBlockedURLs".into(),
-                    json!({ "urls": ["*.png"] })
-                ),
+                Call::BlockUrls(vec!["*.png".into()]),
             ]
         );
     }
 
     #[test]
     fn a_failed_command_stops_the_tab_and_names_the_plugin() {
-        let page = RecordingPage::new().failing("Network.setBlockedURLs");
+        let page = RecordingPage::new().failing("block_urls");
         let set = PluginSet::new().with(BlockResources::media()).unwrap();
         let error = block_on(set.on_page_created(&page))
             .unwrap_err()
