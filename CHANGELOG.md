@@ -17,6 +17,34 @@ version; it stays 0.1.x until the next release.
   `deny_unknown_fields`. `clear_between_tests` and `sweep_stale_profiles` wait
   for plugin API hooks that do not exist: both default to `false` and `true` is
   a configuration error until they work.
+- `seleniumbase-rs-plugin-fetcher`: the `fetcher` plugin (category Core, Chromium
+  over CDP). Declarative network rules through `network()`: `strip` fails whole
+  kinds of resource (never documents), `block` fails URL patterns, `headers` adds
+  request headers (to every request or only to `header_urls`; framing headers and
+  line breaks are refused), and `capture` records matching responses in a log
+  bounded by `max_captures` and `max_body_bytes` (`Fetcher::captured`,
+  `take_captured`). `Cookie`, `Authorization`, `Proxy-Authorization` and
+  `Set-Cookie` stay redacted in a record: the plugin does not hold
+  `net.sensitive`. It is also a `JobRunner` (`{"url"}` gives `{url, status, mime,
+  text, truncated}` through an in-page `fetch` with the browser's cookies; the URL
+  travels as a JSON literal) and a `Task` (`{"urls": [...]}`, one tab, one sink
+  line per URL, a pause between fetches, the site's front page opened first so
+  the fetch is same-origin). Capabilities: `net.intercept`, `net.observe`, `task`,
+  `page.evaluate`, `page.navigate`; optional `net.bodies`.
+- `seleniumbase-rs-plugin-extractor`: the `extractor` plugin (category Core,
+  Chromium over CDP). `Extractor::discover` finds JSON-LD blocks, tables and
+  groups of repeated elements and returns typed `Schema`s (`text`, `number`,
+  `money`, `date`, `url`); `extract` and `extract_values` read records with one,
+  and a value that is missing or does not fit becomes a `Problem`, not an error;
+  `Schema::json_schema` describes the records. A `select` map of CSS selectors
+  reads exactly what it names, and a job can also return the page text, links,
+  tables and meta data. The page script is pure and stops at `max_nodes`. It is a
+  `JobRunner` and a `Task` (`{"urls": [...], "extract": {...}}` or `{"jobs":
+  [...]}`, one sink line per page). Capabilities: `page.evaluate`,
+  `page.navigate`, `task`. The `auto_save` option of the design is not provided:
+  the plugin host has no artifact API yet. Chrome tests (`extractor_chrome.rs`)
+  are `#[ignore]`d.
+
 - `seleniumbase-rs-plugins-builtin`: one cargo feature per built-in plugin
   (`shield`, `block-resources`, `crx`; none on by default), re-exports, and
   `registry()`, a `Registry` with every enabled plugin. The `wasm` host is not
