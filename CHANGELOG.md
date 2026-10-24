@@ -7,6 +7,14 @@ version; it stays 0.1.x until the next release.
 
 ### Added
 
+- `seleniumbase-rs-plugin-imap`: the `imap` plugin (category Core) with the task
+  `wait_for_email`. It waits in an IMAP mailbox, read only and over IMAPS (built
+  on `async-imap`, `tokio-rustls` and `mail-parser`), for an email that matches
+  `from`, `subject_contains` and `since_secs`, and records its sender, subject,
+  date, text, first one-time code and first link. The password comes from the
+  environment variable `password_env` names and is never an option. Not yet
+  wired into `seleniumbase-rs-plugins-builtin`.
+
 - `seleniumbase-rs-plugin-shield`: the `shield` plugin (category Privacy). It
   turns off Chromium's background telemetry (verified switches and features, and
   at the `strict` level a resolver rule per browser-process host), sets privacy
