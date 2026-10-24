@@ -22,7 +22,11 @@ also examples of how to write one.
 
 | Plugin | What it does | Install |
 |---|---|---|
+| [`batcher`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/batcher) | Runs a list of jobs in browser tabs, a few at a time and in chunks, with a time limit, retries with backoff and a resume file, and one result line per job (a job runs the built-in `open` or another plugin such as `fetcher` or `extractor`) | `cargo add seleniumbase-rs-plugin-batcher --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+
 | [`block-resources`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/block-resources) | Stops pages from loading images, fonts or media (faster, less data) | `cargo add seleniumbase-rs-plugin-block-resources --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+| [`crawler`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/crawler) | Crawls the links of a site you own or may test, breadth first in one tab, with a scope, a depth and page limit, a delay and robots.txt, and reports broken pages and JavaScript errors (as a task, or as a test plugin that fails the test) | `cargo add seleniumbase-rs-plugin-crawler --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
+
 | [`crx`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/crx) | Loads packed Chrome extensions (`.crx`, CRX3 and CRX2) | `cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 | [`extractor`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/extractor) | Finds structured data on a page (JSON-LD, tables, repeated cards, selectors) and extracts it as JSON, one typed record per card or row, as a job on a tab or a task over a list of URLs | `cargo add seleniumbase-rs-plugin-extractor --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 | [`fetcher`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/plugins/fetcher) | Rules for the requests a browser sends (strip, block, add headers), a record of the responses, and a task that fetches a list of URLs through the browser with its cookies | `cargo add seleniumbase-rs-plugin-fetcher --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
@@ -34,7 +38,7 @@ The framework itself:
 | Crate | What it is | Install |
 |---|---|---|
 | [`seleniumbase-rs-plugin`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugin) | The API: `Plugin`, `PluginSet`, `LaunchSettings`, `Package`, the `BrowserHandle` and `PageHandle` traits | `cargo add seleniumbase-rs-plugin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
-| [`seleniumbase-rs-plugins-builtin`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugins-builtin) | The built-in plugins behind one cargo feature each (`shield`, `block-resources`, `crx`, `fetcher`, `extractor`), and `registry()`, a registry of the enabled ones that builds a plugin from its name and options | `cargo add seleniumbase-rs-plugins-builtin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins --features shield` |
+| [`seleniumbase-rs-plugins-builtin`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugins-builtin) | The built-in plugins behind one cargo feature each (`shield`, `block-resources`, `crx`, `fetcher`, `extractor`, `batcher`, `crawler`), and `registry()`, a registry of the enabled ones that builds a plugin from its name and options | `cargo add seleniumbase-rs-plugins-builtin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins --features shield` |
 | [`seleniumbase-rs-plugin-testing`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/crates/seleniumbase-rs-plugin-testing) | Recording fakes of the handles, to test a plugin without a browser | `cargo add --dev seleniumbase-rs-plugin-testing --git https://github.com/MustCodeAl/seleniumbase-rs-plugins` |
 | [`template`](https://github.com/MustCodeAl/seleniumbase-rs-plugins/tree/main/template) | Start your own plugin from here | copy the folder |
 

@@ -9,7 +9,9 @@ use seleniumbase_rs_plugins_builtin::registry;
     feature = "block-resources",
     feature = "crx",
     feature = "fetcher",
-    feature = "extractor"
+    feature = "extractor",
+    feature = "batcher",
+    feature = "crawler"
 )))]
 #[test]
 fn with_no_feature_the_registry_is_empty() {
@@ -106,7 +108,9 @@ mod fetcher {
         feature = "shield",
         feature = "block-resources",
         feature = "crx",
-        feature = "extractor"
+        feature = "extractor",
+        feature = "batcher",
+        feature = "crawler"
     )))]
     #[test]
     fn it_adds_exactly_its_own_name() {
@@ -147,11 +151,95 @@ mod extractor {
         feature = "shield",
         feature = "block-resources",
         feature = "crx",
-        feature = "fetcher"
+        feature = "fetcher",
+        feature = "batcher",
+        feature = "crawler"
     )))]
     #[test]
     fn it_adds_exactly_its_own_name() {
         assert_eq!(registry().names(), ["extractor"]);
+    }
+}
+
+#[cfg(feature = "batcher")]
+mod batcher {
+    use super::registry;
+    use seleniumbase_rs_plugins_builtin::PluginSpec;
+    use serde_json::json;
+
+    #[test]
+    fn it_is_listed_and_builds_from_default_options() {
+        let registry = registry();
+        assert!(registry.names().contains(&"batcher"));
+        assert!(registry.get("batcher").unwrap().metadata().is_declared());
+        let plugin = registry.build(&PluginSpec::new("batcher")).unwrap();
+        assert_eq!(plugin.name(), "batcher");
+        let set = registry.plugin_set(&[PluginSpec::new("batcher")]).unwrap();
+        assert_eq!(set.names(), ["batcher"]);
+    }
+
+    #[test]
+    fn a_wrong_option_fails_closed() {
+        let Err(error) =
+            registry().build(&PluginSpec::new("batcher").options(json!({ "concurency": 2 })))
+        else {
+            panic!("a typo must fail");
+        };
+        assert!(error.to_string().contains("concurency"), "{error}");
+    }
+
+    #[cfg(not(any(
+        feature = "shield",
+        feature = "block-resources",
+        feature = "crx",
+        feature = "fetcher",
+        feature = "extractor",
+        feature = "crawler"
+    )))]
+    #[test]
+    fn it_adds_exactly_its_own_name() {
+        assert_eq!(registry().names(), ["batcher"]);
+    }
+}
+
+#[cfg(feature = "crawler")]
+mod crawler {
+    use super::registry;
+    use seleniumbase_rs_plugins_builtin::PluginSpec;
+    use serde_json::json;
+
+    #[test]
+    fn it_is_listed_and_builds_from_default_options() {
+        let registry = registry();
+        assert!(registry.names().contains(&"crawler"));
+        assert!(registry.get("crawler").unwrap().metadata().is_declared());
+        let plugin = registry.build(&PluginSpec::new("crawler")).unwrap();
+        assert_eq!(plugin.name(), "crawler");
+        let set = registry.plugin_set(&[PluginSpec::new("crawler")]).unwrap();
+        assert_eq!(set.names(), ["crawler"]);
+    }
+
+    #[test]
+    fn a_wrong_option_fails_closed() {
+        let Err(error) =
+            registry().build(&PluginSpec::new("crawler").options(json!({ "max_dept": 2 })))
+        else {
+            panic!("a typo must fail");
+        };
+        assert!(error.to_string().contains("max_dept"), "{error}");
+    }
+
+    #[cfg(not(any(
+        feature = "shield",
+        feature = "block-resources",
+        feature = "crx",
+        feature = "fetcher",
+        feature = "extractor",
+        feature = "batcher"
+    )))]
+    #[test]
+    fn it_adds_exactly_its_own_name() {
+        assert_eq!(registry().names(), ["crawler"]);
     }
 }
 
@@ -160,10 +248,12 @@ mod extractor {
     feature = "block-resources",
     feature = "crx",
     feature = "fetcher",
-    feature = "extractor"
+    feature = "extractor",
+    feature = "batcher",
+    feature = "crawler"
 ))]
 #[test]
-fn all_five_are_listed_in_order_and_form_one_strict_set() {
+fn all_seven_are_listed_in_order_and_form_one_strict_set() {
     use seleniumbase_rs_plugin::{BrowserFamily, Engine, LaunchContext};
     use seleniumbase_rs_plugins_builtin::PluginSpec;
     use serde_json::json;
@@ -171,7 +261,15 @@ fn all_five_are_listed_in_order_and_form_one_strict_set() {
     let registry = registry();
     assert_eq!(
         registry.names(),
-        ["shield", "block-resources", "crx", "fetcher", "extractor"]
+        [
+            "shield",
+            "block-resources",
+            "crx",
+            "fetcher",
+            "extractor",
+            "batcher",
+            "crawler"
+        ]
     );
     for name in registry.names() {
         assert!(
@@ -186,6 +284,8 @@ fn all_five_are_listed_in_order_and_form_one_strict_set() {
             PluginSpec::new("crx").options(json!({ "files": [] })),
             PluginSpec::new("fetcher"),
             PluginSpec::new("extractor"),
+            PluginSpec::new("batcher"),
+            PluginSpec::new("crawler"),
         ])
         .unwrap();
     set.check(&LaunchContext {
@@ -199,6 +299,14 @@ fn all_five_are_listed_in_order_and_form_one_strict_set() {
     names.sort_unstable();
     assert_eq!(
         names,
-        ["block-resources", "crx", "extractor", "fetcher", "shield"]
+        [
+            "batcher",
+            "block-resources",
+            "crawler",
+            "crx",
+            "extractor",
+            "fetcher",
+            "shield"
+        ]
     );
 }

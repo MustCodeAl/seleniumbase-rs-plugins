@@ -8,7 +8,8 @@
 //! | `crx` | `crx`, loads packed extensions | `seleniumbase-rs-plugin-crx` |
 //! | `fetcher` | `fetcher`, request rules, response records and a fetch task | `seleniumbase-rs-plugin-fetcher` |
 //! | `extractor` | `extractor`, finds and extracts structured data from pages | `seleniumbase-rs-plugin-extractor` |
-
+//! | `batcher` | `batcher`, runs a list of jobs in tabs, in chunks, with retries and resume | `seleniumbase-rs-plugin-batcher` |
+//! | `crawler` | `crawler`, crawls a site you own or may test and reports broken pages | `seleniumbase-rs-plugin-crawler` |
 //!
 //! No feature is on by default, so a build compiles only the plugins it asks
 //! for. Every plugin is also a crate of its own that depends on the plugin API
@@ -28,8 +29,12 @@
 
 pub use seleniumbase_rs_plugin::{Descriptor, PluginSpec, Registry};
 
+#[cfg(feature = "batcher")]
+pub use seleniumbase_rs_plugin_batcher as batcher;
 #[cfg(feature = "block-resources")]
 pub use seleniumbase_rs_plugin_block_resources as block_resources;
+#[cfg(feature = "crawler")]
+pub use seleniumbase_rs_plugin_crawler as crawler;
 #[cfg(feature = "crx")]
 pub use seleniumbase_rs_plugin_crx as crx;
 #[cfg(feature = "extractor")]
@@ -40,7 +45,8 @@ pub use seleniumbase_rs_plugin_fetcher as fetcher;
 pub use seleniumbase_rs_plugin_shield as shield;
 
 /// A registry of every built-in plugin whose feature is on, in the order
-/// `shield`, `block-resources`, `crx`, `fetcher`, `extractor`. Empty when no feature is on.
+/// `shield`, `block-resources`, `crx`, `fetcher`, `extractor`, `batcher`,
+/// `crawler`. Empty when no feature is on.
 #[must_use]
 pub fn registry() -> Registry {
     #[allow(unused_mut)]
@@ -64,6 +70,14 @@ pub fn registry() -> Registry {
     #[cfg(feature = "extractor")]
     {
         registry = registry.with(Descriptor::of::<extractor::Extractor>());
+    }
+    #[cfg(feature = "batcher")]
+    {
+        registry = registry.with(Descriptor::of::<batcher::Batcher>());
+    }
+    #[cfg(feature = "crawler")]
+    {
+        registry = registry.with(Descriptor::of::<crawler::Crawler>());
     }
     registry
 }
