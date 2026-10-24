@@ -6,6 +6,9 @@
 //! | `shield` | `shield`, privacy hardening | `seleniumbase-rs-plugin-shield` |
 //! | `block-resources` | `block-resources`, no images, fonts or media | `seleniumbase-rs-plugin-block-resources` |
 //! | `crx` | `crx`, loads packed extensions | `seleniumbase-rs-plugin-crx` |
+//! | `fetcher` | `fetcher`, request rules, response records and a fetch task | `seleniumbase-rs-plugin-fetcher` |
+//! | `extractor` | `extractor`, finds and extracts structured data from pages | `seleniumbase-rs-plugin-extractor` |
+
 //!
 //! No feature is on by default, so a build compiles only the plugins it asks
 //! for. Every plugin is also a crate of its own that depends on the plugin API
@@ -29,11 +32,15 @@ pub use seleniumbase_rs_plugin::{Descriptor, PluginSpec, Registry};
 pub use seleniumbase_rs_plugin_block_resources as block_resources;
 #[cfg(feature = "crx")]
 pub use seleniumbase_rs_plugin_crx as crx;
+#[cfg(feature = "extractor")]
+pub use seleniumbase_rs_plugin_extractor as extractor;
+#[cfg(feature = "fetcher")]
+pub use seleniumbase_rs_plugin_fetcher as fetcher;
 #[cfg(feature = "shield")]
 pub use seleniumbase_rs_plugin_shield as shield;
 
 /// A registry of every built-in plugin whose feature is on, in the order
-/// `shield`, `block-resources`, `crx`. Empty when no feature is on.
+/// `shield`, `block-resources`, `crx`, `fetcher`, `extractor`. Empty when no feature is on.
 #[must_use]
 pub fn registry() -> Registry {
     #[allow(unused_mut)]
@@ -49,6 +56,14 @@ pub fn registry() -> Registry {
     #[cfg(feature = "crx")]
     {
         registry = registry.with(Descriptor::of::<crx::CrxExtensions>());
+    }
+    #[cfg(feature = "fetcher")]
+    {
+        registry = registry.with(Descriptor::of::<fetcher::Fetcher>());
+    }
+    #[cfg(feature = "extractor")]
+    {
+        registry = registry.with(Descriptor::of::<extractor::Extractor>());
     }
     registry
 }

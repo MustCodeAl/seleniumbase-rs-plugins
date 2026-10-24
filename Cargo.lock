@@ -301,6 +301,8 @@ dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-block-resources",
  "seleniumbase-rs-plugin-crx",
+ "seleniumbase-rs-plugin-extractor",
+ "seleniumbase-rs-plugin-fetcher",
  "seleniumbase-rs-plugin-shield",
  "seleniumbase-rs-plugin-testing",
  "serde_json",

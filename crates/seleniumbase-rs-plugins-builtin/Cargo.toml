@@ -15,12 +15,16 @@ default = []
 shield = ["dep:seleniumbase-rs-plugin-shield"]
 block-resources = ["dep:seleniumbase-rs-plugin-block-resources"]
 crx = ["dep:seleniumbase-rs-plugin-crx"]
+fetcher = ["dep:seleniumbase-rs-plugin-fetcher"]
+extractor = ["dep:seleniumbase-rs-plugin-extractor"]
 
 [dependencies]
 seleniumbase-rs-plugin.workspace = true
 seleniumbase-rs-plugin-shield = { workspace = true, optional = true }
 seleniumbase-rs-plugin-block-resources = { workspace = true, optional = true }
 seleniumbase-rs-plugin-crx = { workspace = true, optional = true }
+seleniumbase-rs-plugin-fetcher = { workspace = true, optional = true }
+seleniumbase-rs-plugin-extractor = { workspace = true, optional = true }
 
 [dev-dependencies]
 seleniumbase-rs-plugin-testing.workspace = true
