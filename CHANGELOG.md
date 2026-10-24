@@ -65,7 +65,7 @@ version; it stays 0.1.x until the next release.
   options that choose the pages are unchanged. Capabilities: `task`,
   `page.navigate`, `page.evaluate`, `net.observe`, `test.hooks`; with a state
   file also `host.fs.read` and `host.fs.write` for that file. The
-  `#[ignore]`d `crawler_chrome` test has not been run in a real Chrome.
+  `#[ignore]`d `crawler_chrome` test passed in headless Chrome against a local fixture site (a stand-in tab, not the host's CDP engine).
 
 
 - `seleniumbase-rs-plugins-builtin`: one cargo feature per built-in plugin
