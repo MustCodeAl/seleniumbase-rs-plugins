@@ -1,0 +1,17 @@
+[package]
+name = "seleniumbase-rs-plugin-crawler"
+description = "A seleniumbase-rs plugin that crawls a site you own or may test, finds broken links and console errors, and fails the test with a report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "crawler", "testing"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
