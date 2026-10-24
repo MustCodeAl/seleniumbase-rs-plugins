@@ -90,8 +90,8 @@ impl std::ops::BitOr for Seals {
     }
 }
 
-/// Time limits a plugin asks for; the set caps them. Phase 1 stores them; a
-/// timer enforces them in a later phase.
+/// Time limits a plugin asks for, per hook. A set that has a timer gives each hook the limit here, or [`Budgets::default_for`] when the field is `None`, and raises no limit above [`Budgets::MAX_FACTOR`] times that default. A set without a timer applies none of them.
+///
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Budgets {
@@ -99,6 +99,58 @@ pub struct Budgets {
     pub before_launch: Option<Duration>,
     /// For `on_page_created`.
     pub on_page_created: Option<Duration>,
+    /// For `before_navigate`.
+    pub before_navigate: Option<Duration>,
+    /// For `on_request`.
+    pub on_request: Option<Duration>,
+    /// For `on_test_end`.
+    pub on_test_end: Option<Duration>,
+    /// For `before_close`.
+    pub before_close: Option<Duration>,
+    /// For `on_close`.
+    pub on_close: Option<Duration>,
+    /// For every hook not named above.
+    pub other: Option<Duration>,
+}
+
+impl Budgets {
+    /// A plugin's request is raised no higher than this many times the default
+    /// limit of the hook.
+    pub const MAX_FACTOR: u32 = 4;
+
+    /// The limit a set gives `hook` when the plugin asks for nothing:
+    /// `before_launch` and `on_test_end` 30 s, `before_navigate` 5 s,
+    /// `on_request` 2 s, every other hook 10 s.
+    #[must_use]
+    pub fn default_for(hook: &str) -> Duration {
+        Duration::from_secs(match hook {
+            "before_launch" | "on_test_end" => 30,
+            "before_navigate" => 5,
+            "on_request" => 2,
+            _ => 10,
+        })
+    }
+
+    /// The limit for `hook`: what the plugin asked for (zero counts as not
+    /// asking), at most [`MAX_FACTOR`](Self::MAX_FACTOR) times the default,
+    /// else the default.
+    #[must_use]
+    pub fn limit_for(&self, hook: &str) -> Duration {
+        let requested = match hook {
+            "before_launch" => self.before_launch,
+            "on_page_created" => self.on_page_created,
+            "before_navigate" => self.before_navigate,
+            "on_request" => self.on_request,
+            "on_test_end" => self.on_test_end,
+            "before_close" => self.before_close,
+            "on_close" => self.on_close,
+            _ => self.other,
+        };
+        let default = Self::default_for(hook);
+        requested
+            .filter(|asked| !asked.is_zero())
+            .map_or(default, |asked| asked.min(default * Self::MAX_FACTOR))
+    }
 }
 
 /// What a plugin declares about itself.

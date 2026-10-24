@@ -119,6 +119,9 @@
 
 mod capability;
 mod context;
+
+mod panic;
+
 mod nav;
 mod network;
 mod task;
@@ -146,6 +149,7 @@ pub use capability::{
 };
 pub use config::{Configurable, Descriptor, PluginSpec, Registry};
 pub use context::{BrowserId, ContextHandle, ContextId, ContextSettings, LoadedExtension, PageId};
+
 pub use host::{HostInfo, HostKind};
 pub use nav::{MAX_REDIRECTS, NavDecision, NavOrigin, NavOutcome, Navigation};
 pub use network::{
@@ -263,6 +267,28 @@ pub enum PluginError {
     /// A time limit ran out.
     #[error("timed out after {0:?}")]
     Timeout(Duration),
+    /// A hook panicked. The set caught the panic, so the host goes on; the
+    /// panic message went to the process's panic hook.
+    #[error("plugin `{plugin}` panicked in `{hook}`")]
+    Panicked {
+        /// The plugin whose hook panicked.
+        plugin: String,
+        /// The hook, such as `on_request`.
+        hook: &'static str,
+    },
+    /// A plugin used a handle in a way that would run the hooks it is in
+    /// again, such as navigating inside `before_navigate`.
+    #[error(
+        "plugin `{plugin}` called `{operation}` inside `{hook}`, which would run its hooks again"
+    )]
+    Reentrant {
+        /// The plugin.
+        plugin: String,
+        /// What it called, such as `navigate`.
+        operation: &'static str,
+        /// The hook it was in.
+        hook: &'static str,
+    },
 }
 
 impl PluginError {
@@ -842,15 +868,20 @@ struct Entry {
     grants: CapabilitySet,
     /// What `plugin.network()` said when the plugin was added.
     interest: NetworkInterest,
+    /// The time limits the plugin asked for when it was added.
+    budgets: Budgets,
 }
 
 impl Entry {
     fn new(plugin: Arc<dyn Plugin>, grants: CapabilitySet) -> Self {
         let interest = plugin.network();
+        let budgets = plugin.metadata().budgets;
+
         Self {
             plugin,
             grants,
             interest,
+            budgets,
         }
     }
 }
@@ -1194,11 +1225,8 @@ impl PluginSet {
         let mut sealed: Vec<(&'static str, String, String)> = Vec::new();
         for entry in self.ordered() {
             let before = launch.clone();
-            entry
-                .plugin
-                .before_launch(launch)
-                .await
-                .map_err(|error| in_hook(entry.plugin.as_ref(), "before_launch", error))?;
+            self.run_hook(entry, "before_launch", entry.plugin.before_launch(launch))
+                .await?;
             verify_launch(entry, &before, launch, &mut sealed)?;
         }
         Ok(())
@@ -1211,11 +1239,8 @@ impl PluginSet {
     /// The first hook error, as [`PluginError::Hook`].
     pub async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
         for entry in self.ordered() {
-            entry
-                .plugin
-                .on_browser(browser)
-                .await
-                .map_err(|error| in_hook(entry.plugin.as_ref(), "on_browser", error))?;
+            self.run_hook(entry, "on_browser", entry.plugin.on_browser(browser))
+                .await?;
         }
         Ok(())
     }
@@ -1234,10 +1259,8 @@ impl PluginSet {
                     .await
                     .map_err(|error| in_hook(plugin.as_ref(), "packages", error))?;
             }
-            plugin
-                .on_page_created(page)
-                .await
-                .map_err(|error| in_hook(plugin.as_ref(), "on_page_created", error))?;
+            self.run_hook(entry, "on_page_created", plugin.on_page_created(page))
+                .await?;
         }
         Ok(())
     }
@@ -1247,8 +1270,11 @@ impl PluginSet {
     pub async fn on_close(&self) -> Vec<PluginError> {
         let mut failures = Vec::new();
         for entry in self.ordered() {
-            if let Err(error) = entry.plugin.on_close().await {
-                failures.push(in_hook(entry.plugin.as_ref(), "on_close", error));
+            if let Err(error) = self
+                .run_hook(entry, "on_close", entry.plugin.on_close())
+                .await
+            {
+                failures.push(error);
             }
         }
         failures
@@ -1435,7 +1461,7 @@ fn verify_launch(
 /// What the set needs from a host and from a plugin's grants to run hooks.
 impl PluginSet {
     /// Gives the set a timer. Tasks get a [`Clock`] over it
-    /// ([`clock`](Self::clock)), and the hook time limits a later release adds
+    /// ([`clock`](Self::clock)), and the time limits of the hooks ([`Budgets`])
     /// apply only to a set that has one: without a timer nothing times out.
     #[must_use]
     pub fn with_timer(mut self, timer: Arc<dyn Timer>) -> Self {
@@ -1486,14 +1512,33 @@ impl PluginSet {
     /// Runs one hook of one plugin and names the plugin in its error. Every
     /// dispatcher of the hooks added in 0.1.3 calls its hooks through here, so
     /// that panic capture and time budgets have one place to go.
+    ///
+    /// A panic in the hook is caught and becomes [`PluginError::Panicked`].
+    /// When the set has a timer, the hook gets the plugin's limit for it
+    /// ([`Budgets::limit_for`]) and [`PluginError::Timeout`] comes back,
+    /// unchanged, once the limit has passed: the hook's future is dropped. Any
+    /// other error becomes a [`PluginError::Hook`] naming the plugin.
     async fn run_hook<T>(
         &self,
         entry: &Entry,
         hook: &'static str,
         call: impl std::future::Future<Output = Result<T>>,
     ) -> Result<T> {
-        call.await
-            .map_err(|error| in_hook(entry.plugin.as_ref(), hook, error))
+        let caught = panic::catch(call);
+        let outcome = match &self.timer {
+            Some(timer) => {
+                let limit = entry.budgets.limit_for(hook);
+                Clock::new(Arc::clone(timer)).timeout(limit, caught).await?
+            }
+            None => caught.await,
+        };
+        match outcome {
+            Ok(result) => result.map_err(|error| in_hook(entry.plugin.as_ref(), hook, error)),
+            Err(()) => Err(PluginError::Panicked {
+                plugin: entry.plugin.name().to_owned(),
+                hook,
+            }),
+        }
     }
 
     /// Checks what a plugin declares outside its metadata: network interest and

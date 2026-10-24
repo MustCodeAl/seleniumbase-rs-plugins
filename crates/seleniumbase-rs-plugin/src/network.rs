@@ -525,6 +525,9 @@ impl PluginSet {
                 let reason = match result {
                     Ok(RequestDecision::Continue) => None,
                     Ok(RequestDecision::Block(reason)) => Some(format!("{name}: {reason}")),
+                    Err(PluginError::Timeout(limit)) => {
+                        Some(format!("{name}: on_request timed out after {limit:?}"))
+                    }
                     Err(error) => Some(error.to_string()),
                 };
                 if blocked.is_none() {
