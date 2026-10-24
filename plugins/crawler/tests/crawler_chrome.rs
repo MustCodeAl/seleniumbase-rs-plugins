@@ -78,7 +78,7 @@ impl Server {
     /// it and writes the JSON answer into the page.
     fn start(
         expression: Expression,
-        router: impl Fn(&str) -> Option<(u16, String)> + Send + 'static,
+        router: impl Fn(&str) -> Option<(u16, String)> + Send + Sync + 'static,
     ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a free local port");
         let port = listener.local_addr().unwrap().port();
@@ -94,6 +94,19 @@ impl Server {
 
     fn base(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// The paths requested, each once, in the order they first came. Chrome
+    /// asks for the root of a site once more on every start, so a path is not
+    /// counted twice.
+    fn pages(&self) -> Vec<String> {
+        let mut seen: Vec<String> = Vec::new();
+        for path in self.requests() {
+            if !seen.contains(&path) {
+                seen.push(path);
+            }
+        }
+        seen
     }
 
     fn requests(&self) -> Vec<String> {
@@ -341,7 +354,7 @@ fn a_local_site_with_a_broken_link_fails_the_test_with_the_summary_and_never_lea
 
     let base = main.base();
     assert_eq!(
-        main.requests(),
+        main.pages(),
         ["/robots.txt", "/", "/a", "/missing", "/a/deep"],
         "{summary}"
     );
