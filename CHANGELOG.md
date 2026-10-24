@@ -53,6 +53,28 @@ version; it stays 0.1.x until the next release.
   with_id, in_context}` (clonable), `RecordingBrowser::{with_contexts, failing,
   with_extensions}` with live and peak counts of contexts and tabs and
   `FakeContext`, `ManualTimer`, `drive_request`, `drive_response` and `VecSink`.
+- `seleniumbase-rs-plugin` 0.1.3: a plugin cannot take the host down. A panic
+  in any hook is caught and becomes `PluginError::Panicked { plugin, hook }`
+  (the dispatchers of `before_launch`, `on_browser`, `on_page_created` and
+  `on_close` now go through the same `run_hook` as the new hooks). A set that
+  has a timer (`PluginSet::with_timer`) cuts every hook off at its limit with
+  `PluginError::Timeout`: `before_navigate` 5 s, `on_request` 2 s (the request
+  is blocked), `on_test_end` and `before_launch` 30 s, every other hook 10 s.
+  `Metadata::budget` can ask for another limit per hook (`Budgets` gained
+  `before_navigate`, `on_request`, `on_test_end`, `before_close`, `on_close` and
+  `other`), at most four times the default (`Budgets::{default_for,
+  limit_for}`); without a timer nothing times out. Every browser, tab and
+  context handle a hook gets is a `Guarded<H>` made for that plugin: a protocol
+  command needs the capabilities `cdp_policy::required` names (a plugin with
+  `raw:cdp` may send any other command), `Fetch.*`, `Target.setAutoAttach`,
+  `Browser.close`, `Browser.crash` and `Browser.crashGpuProcess` are refused for
+  every plugin (`cdp_policy::host_owned`), a raw `Network.setBlockedURLs` is
+  turned into `PageHandle::block_urls` (and sent as it was on a tab that does
+  not offer that), `navigate` inside `before_navigate` and `new_page` or
+  `new_context` inside a page or context hook fail with `PluginError::Reentrant`,
+  and handles opened through a guarded handle are guarded too.
+  `PluginSet::{guarded_browser, guarded_page, guarded_context}` guard a handle
+  for work outside the hooks, such as a task. Tests in `tests/guard.rs`.
 
 ### Changed
 
@@ -64,4 +86,14 @@ version; it stays 0.1.x until the next release.
   `match` on it needs an arm for them.
 - `seleniumbase-rs-plugin`: the `config` module is public (its items were
   already re-exported at the crate root).
+- `seleniumbase-rs-plugin`: a plugin's raw `Network.setBlockedURLs` reaches the
+  tab as `block_urls`, so a recording tab shows `Call::BlockUrls` where it
+  showed `Call::Send("Network.setBlockedURLs", ..)`; the tests of
+  `block-resources` and `wasm` and `tests/legacy.rs` were updated to match.
+  A plugin that sends a command without the capability the table names (for
+  example `Network.getCookies` without `cookies.read`) now gets an error; the
+  legacy capability set (`raw:cdp`) still covers every command the host does
+  not keep for itself.
+- `seleniumbase-rs-plugin`: `PluginError` has two new variants, `Panicked` and
+  `Reentrant`.
 
