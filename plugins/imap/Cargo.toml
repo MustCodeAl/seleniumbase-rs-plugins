@@ -1,0 +1,25 @@
+[package]
+name = "seleniumbase-rs-plugin-imap"
+description = "A seleniumbase-rs plugin that waits for an email over IMAP and extracts its one-time code or link"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "imap", "email"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
+mail-parser = "1"
+tokio = { version = "1", default-features = false, features = ["net"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
+tokio = { version = "1", features = ["rt", "macros", "time"] }

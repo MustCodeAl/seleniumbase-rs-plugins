@@ -1,0 +1,16 @@
+From: Example Service <no-reply@example.com>
+To: me@example.com
+Subject: Verify your email address
+Date: Sat, 24 Oct 2026 10:00:00 +0000
+Message-ID: <plain-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Hello,
+
+Your verification code is 482910. It expires in 10 minutes.
+
+Or confirm in one click: https://example.com/verify?token=abc123&x=1.
+
+Order 2026-10-24 at 10:30, total $1,234.56.
+(c) 2026 Example Inc.

@@ -1,0 +1,9 @@
+From: "Acme App" <hello@acme.example.org>
+To: me@example.com
+Subject: Sign in to Acme
+Date: Sat, 24 Oct 2026 10:01:00 +0000
+Message-ID: <html-1@acme.example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<html><head><style>.x { width: 12345px }</style></head><body><p>Use <b>739 204</b> to sign in.</p><p><a href="https://app.example.org/confirm?a=1&amp;b=2">Confirm your email</a></p></body></html>
