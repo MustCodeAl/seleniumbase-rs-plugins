@@ -1,0 +1,17 @@
+[package]
+name = "seleniumbase-rs-plugin-extractor"
+description = "A seleniumbase-rs plugin that finds structured data on a page (JSON-LD, tables, repeated cards, CSS selectors) and extracts it as JSON"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "scraping", "extraction"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true

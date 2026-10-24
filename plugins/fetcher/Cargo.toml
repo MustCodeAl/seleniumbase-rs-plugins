@@ -1,0 +1,17 @@
+[package]
+name = "seleniumbase-rs-plugin-fetcher"
+description = "A seleniumbase-rs plugin that sets, blocks and records requests, and fetches URLs through the browser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "network", "chromium"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
