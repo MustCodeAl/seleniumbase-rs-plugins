@@ -39,6 +39,17 @@ use seleniumbase_rs_plugin::{
     BrowserFamily, BrowserHandle, Engine, PageHandle, PluginError, Result, async_trait,
 };
 use serde_json::Value;
+use std::sync::Arc;
+
+use seleniumbase_rs_plugin::{ContextHandle, ContextId, ContextSettings, LoadedExtension, PageId};
+
+mod contexts;
+mod drive;
+mod timer;
+
+pub use contexts::FakeContext;
+pub use drive::{VecSink, drive_request, drive_response};
+pub use timer::ManualTimer;
 
 /// One thing a plugin asked a fake handle to do.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +60,20 @@ pub enum Call {
     InitScript(String),
     /// An expression to evaluate.
     Evaluate(String),
+    /// A navigation to this address.
+    Navigate(String),
+    /// A question about the tab's current address.
+    Url,
+    /// A request to close the tab.
+    Close,
+    /// URL patterns to block.
+    BlockUrls(Vec<String>),
+    /// A new browser context with these settings.
+    NewContext(ContextSettings),
+    /// A new tab, at this address if given.
+    NewPage(Option<String>),
+    /// A request to dispose a context.
+    Dispose,
 }
 
 #[derive(Debug, Default)]
@@ -56,6 +81,10 @@ struct Recorder {
     calls: Mutex<Vec<Call>>,
     replies: Mutex<HashMap<String, Value>>,
     failing: Mutex<Option<String>>,
+    /// Canned answers to `evaluate`: the first whose text the expression contains.
+    evaluations: Mutex<Vec<(String, Value)>>,
+    /// The address `url()` answers with; `navigate` changes it.
+    location: Mutex<Option<String>>,
 }
 
 impl Recorder {
@@ -87,7 +116,21 @@ impl Recorder {
 #[derive(Debug)]
 pub struct RecordingPage {
     engine: Engine,
-    recorder: Recorder,
+    recorder: Arc<Recorder>,
+    id: PageId,
+    context: Option<ContextId>,
+}
+
+/// A clone is another handle to the same tab: both write to one record.
+impl Clone for RecordingPage {
+    fn clone(&self) -> Self {
+        Self {
+            engine: self.engine,
+            recorder: Arc::clone(&self.recorder),
+            id: self.id.clone(),
+            context: self.context.clone(),
+        }
+    }
 }
 
 impl Default for RecordingPage {
@@ -108,8 +151,47 @@ impl RecordingPage {
     pub fn on(engine: Engine) -> Self {
         Self {
             engine,
-            recorder: Recorder::default(),
+            recorder: Arc::default(),
+            id: PageId::unknown(),
+            context: None,
         }
+    }
+
+    /// Makes `evaluate` answer with `reply` for an expression that contains
+    /// `substring`; the first match wins, and other expressions answer `null`.
+    #[must_use]
+    pub fn evaluating(self, substring: &str, reply: Value) -> Self {
+        self.recorder
+            .evaluations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((substring.to_owned(), reply));
+        self
+    }
+
+    /// Sets the address [`PageHandle::url`] answers with.
+    #[must_use]
+    pub fn at(self, url: &str) -> Self {
+        *self
+            .recorder
+            .location
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(url.to_owned());
+        self
+    }
+
+    /// Sets the id [`PageHandle::id`] answers with.
+    #[must_use]
+    pub fn with_id(mut self, id: PageId) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// Puts the tab in a context, which [`PageHandle::context`] reports.
+    #[must_use]
+    pub fn in_context(mut self, context: ContextId) -> Self {
+        self.context = Some(context);
+        self
     }
 
     /// Makes `method` (or `"add_init_script"`, `"evaluate"`) answer with an error.
@@ -159,7 +241,59 @@ impl PageHandle for RecordingPage {
 
     async fn evaluate(&self, expression: &str) -> Result<Value> {
         self.recorder.record(Call::Evaluate(expression.to_owned()));
-        self.recorder.answer("evaluate")
+        let canned = self
+            .recorder
+            .evaluations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|(substring, _)| expression.contains(substring.as_str()))
+            .map(|(_, reply)| reply.clone());
+        match canned {
+            Some(reply) => Ok(reply),
+            None => self.recorder.answer("evaluate"),
+        }
+    }
+
+    fn id(&self) -> PageId {
+        self.id.clone()
+    }
+
+    fn context(&self) -> Option<ContextId> {
+        self.context.clone()
+    }
+
+    async fn url(&self) -> Result<String> {
+        self.recorder.record(Call::Url);
+        self.recorder.answer("url")?;
+        Ok(self
+            .recorder
+            .location
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| "about:blank".to_owned()))
+    }
+
+    async fn navigate(&self, url: &str) -> Result<()> {
+        self.recorder.record(Call::Navigate(url.to_owned()));
+        self.recorder.answer("navigate")?;
+        *self
+            .recorder
+            .location
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(url.to_owned());
+        Ok(())
+    }
+
+    async fn block_urls(&self, patterns: &[String]) -> Result<()> {
+        self.recorder.record(Call::BlockUrls(patterns.to_vec()));
+        self.recorder.answer("block_urls").map(drop)
+    }
+
+    async fn close(&self) -> Result<()> {
+        self.recorder.record(Call::Close);
+        self.recorder.answer("close").map(drop)
     }
 }
 
@@ -168,7 +302,11 @@ impl PageHandle for RecordingPage {
 pub struct RecordingBrowser {
     engine: Engine,
     family: BrowserFamily,
-    recorder: Recorder,
+    recorder: Arc<Recorder>,
+    world: Option<Arc<contexts::World>>,
+    extensions: Vec<LoadedExtension>,
+    made_contexts: Mutex<Vec<FakeContext>>,
+    made_pages: Mutex<Vec<RecordingPage>>,
 }
 
 impl Default for RecordingBrowser {
@@ -190,7 +328,11 @@ impl RecordingBrowser {
         Self {
             engine,
             family,
-            recorder: Recorder::default(),
+            recorder: Arc::default(),
+            world: None,
+            extensions: Vec::new(),
+            made_contexts: Mutex::default(),
+            made_pages: Mutex::default(),
         }
     }
 
@@ -209,6 +351,21 @@ impl BrowserHandle for RecordingBrowser {
 
     fn family(&self) -> BrowserFamily {
         self.family
+    }
+
+    fn extensions(&self) -> Vec<LoadedExtension> {
+        self.extensions.clone()
+    }
+
+    async fn new_context<'a>(
+        &'a self,
+        settings: ContextSettings,
+    ) -> Result<Box<dyn ContextHandle + 'a>> {
+        Ok(Box::new(self.make_context(settings)?))
+    }
+
+    async fn new_page<'a>(&'a self, url: Option<&str>) -> Result<Box<dyn PageHandle + 'a>> {
+        self.make_page(url)
     }
 
     async fn send(&self, method: &str, params: Value) -> Result<Value> {
