@@ -44,6 +44,26 @@ version; it stays 0.1.x until the next release.
   `page.navigate`, `task`. The `auto_save` option of the design is not provided:
   the plugin host has no artifact API yet. Chrome tests (`extractor_chrome.rs`)
   are `#[ignore]`d.
+- `seleniumbase-rs-plugin-batcher`: the `batcher` plugin (category Environment,
+  Chromium over CDP). Its task takes `{"jobs": [...]}` and runs each job through
+  a job runner, the built-in `open` (opens a URL, answers `{title, url}`) or the
+  `runner` of another plugin in the set such as `fetcher` or `extractor`, which
+  gets the tab with its own capabilities only. `concurrency` (default 2, up to
+  32) tabs work at a time; jobs go to a browser context in chunks of
+  `chunk_size` (25), one context after the other, and the context and its tabs
+  are closed after each chunk. Each attempt has a tab of its own and the time
+  limit `job_timeout_secs` (60); a time limit, a browser error or a failing hook
+  is tried again up to `retries` times (1) after `backoff_ms` (500), twice that,
+  and so on; a policy denial (a cancelled navigation, `ERR_BLOCKED_BY_CLIENT`)
+  and a bad job are never tried again, and a missing capability ends the run.
+  One line per job goes to the sink, `{chunk, index, job, outcome}`, in the order
+  the jobs finish or, with `ordered`, in the order of the input; the summary is
+  `{total, ok, failed, skipped, retried, chunks}`. `resume_file` lists the jobs
+  that finished (a hash of the runner and the job, no job text), so a second run
+  skips them. `warm_up` takes the tab to the job's site first (on for `fetcher`).
+  Capabilities: `task`, `contexts`, `page.navigate`, `page.evaluate`, and the
+  resume path when set. The only new dependency is `futures-util` (`std` only).
+
 
 - `seleniumbase-rs-plugins-builtin`: one cargo feature per built-in plugin
   (`shield`, `block-resources`, `crx`; none on by default), re-exports, and
