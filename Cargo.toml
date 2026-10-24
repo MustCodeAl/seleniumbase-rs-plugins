@@ -5,6 +5,7 @@ members = [
     "crates/seleniumbase-rs-plugin-testing",
     "crates/seleniumbase-rs-plugins-builtin",
     "plugins/block-resources",
+    "plugins/crawler",
     "plugins/crx",
     "plugins/extractor",
     "plugins/fetcher",
@@ -24,6 +25,7 @@ repository = "https://github.com/MustCodeAl/seleniumbase-rs-plugins"
 seleniumbase-rs-plugin = { path = "crates/seleniumbase-rs-plugin" }
 seleniumbase-rs-plugin-testing = { path = "crates/seleniumbase-rs-plugin-testing" }
 seleniumbase-rs-plugin-block-resources = { path = "plugins/block-resources", version = "0.1" }
+seleniumbase-rs-plugin-crawler = { path = "plugins/crawler", version = "0.1" }
 seleniumbase-rs-plugin-crx = { path = "plugins/crx", version = "0.1" }
 seleniumbase-rs-plugin-extractor = { path = "plugins/extractor", version = "0.1" }
 seleniumbase-rs-plugin-fetcher = { path = "plugins/fetcher", version = "0.1" }
