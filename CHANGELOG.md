@@ -44,6 +44,29 @@ version; it stays 0.1.x until the next release.
   `page.navigate`, `task`. The `auto_save` option of the design is not provided:
   the plugin host has no artifact API yet. Chrome tests (`extractor_chrome.rs`)
   are `#[ignore]`d.
+- `seleniumbase-rs-plugin-crawler`: the `crawler` plugin (category Testing,
+  Chromium over CDP) for sites you own or may test. As a `Task` (`sbrs plugin
+  run crawler`, input `{"start": [...], "resume": true}`) it crawls `a[href]`
+  links breadth first in one tab: scope `same-origin`, `same-site` or `{hosts}`,
+  `include`/`exclude` globs, links normalised and deduplicated, `max_depth` (3),
+  `max_pages` (500, at most 50000), `delay_ms` (1000), robots.txt read in the tab
+  and obeyed unless `respect_robots = false` (`sbrs` group before `*`, longest
+  rule, `Crawl-delay`), page-level `nofollow`. It writes one sink line per page
+  (`url`, `depth`, `from`, `status`, `title`, `links`, `queued`, or `error`) and
+  returns a `Report` (`pages`, `edges`, `broken`, `js_errors`, `unreached`,
+  `robots_blocked`, `truncated`, `passed`, `summary`). A page is broken above
+  `expect.max_status` (399) or when it does not load (counted as 404); the
+  summary uses the wording of Python's `assert_no_404_errors`. As a test plugin
+  it cancels navigation outside the scope while a crawl runs
+  (`before_navigate`), records console errors from `Runtime.exceptionThrown` and
+  `Log.entryAdded`, and fails the next `on_test_end` with the summary unless the
+  report passed (`expect.must_reach`, `expect.no_console_errors`). An optional
+  `state_file` (temporary file and rename) resumes a stopped crawl when the
+  options that choose the pages are unchanged. Capabilities: `task`,
+  `page.navigate`, `page.evaluate`, `net.observe`, `test.hooks`; with a state
+  file also `host.fs.read` and `host.fs.write` for that file. The
+  `#[ignore]`d `crawler_chrome` test has not been run in a real Chrome.
+
 
 - `seleniumbase-rs-plugins-builtin`: one cargo feature per built-in plugin
   (`shield`, `block-resources`, `crx`; none on by default), re-exports, and
