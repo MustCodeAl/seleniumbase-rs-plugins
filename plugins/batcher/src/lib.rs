@@ -21,10 +21,13 @@
 //! ```
 
 mod config;
+mod job;
+mod resume;
+mod run;
 
 use seleniumbase_rs_plugin::{
-    Capability, Category, Configurable, Metadata, PathScope, Plugin, Requirements, Result,
-    async_trait, config::options,
+    Capability, Category, Configurable, Metadata, PathScope, Plugin, Requirements, Result, Task,
+    TaskContext, async_trait, config::options,
 };
 use serde_json::Value;
 
@@ -71,6 +74,10 @@ impl Plugin for Batcher {
         Requirements::CHROMIUM_ONLY
     }
 
+    fn task(&self) -> Option<&dyn Task> {
+        Some(self)
+    }
+
     /// What [`Configurable::describe`] says, plus what the options add: the
     /// plugin whose runner does the work, and the resume file.
     fn metadata(&self) -> Metadata {
@@ -85,6 +92,16 @@ impl Plugin for Batcher {
                 .capability(Capability::HostFsWrite(scope));
         }
         meta
+    }
+}
+
+#[async_trait]
+impl Task for Batcher {
+    /// Runs `{"jobs": [...]}`: the jobs go to the runner in chunks, a few tabs
+    /// at a time, and each one records a line to the sink,
+    /// `{"chunk", "index", "job", "outcome"}`. See the [crate documentation](crate).
+    async fn run(&self, cx: &TaskContext<'_>) -> Result<Value> {
+        run::run(&self.config, cx).await
     }
 }
 
