@@ -70,7 +70,9 @@ impl HostInfo {
         }
     }
 
-    /// Whether the host can provide `capability`.
+    /// Whether the host can provide `capability`. WebDriver hosts offer no
+    /// browser contexts, request interception, tasks or test hooks yet, so a
+    /// plugin that needs one is refused there with a message naming it.
     #[must_use]
     pub fn supports(&self, capability: &Capability) -> bool {
         use Capability as C;
@@ -84,6 +86,8 @@ impl HostInfo {
                     | C::NetBodies
                     | C::NetIntercept
                     | C::NetFulfill
+                    | C::Task
+                    | C::TestHooks
             ),
             HostKind::WebDriverOther => !matches!(
                 capability,
@@ -93,6 +97,8 @@ impl HostInfo {
                     | C::NetBodies
                     | C::NetIntercept
                     | C::NetFulfill
+                    | C::Task
+                    | C::TestHooks
                     | C::Cdp(_)
                     | C::Raw(_)
             ),

@@ -36,7 +36,14 @@
 //! ```
 
 mod capability;
-mod config;
+mod context;
+mod nav;
+mod network;
+mod task;
+mod testhook;
+mod timer;
+
+pub mod config;
 mod host;
 mod metadata;
 mod order;
@@ -45,6 +52,8 @@ pub mod switch_policy;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 pub use async_trait::async_trait;
 use serde_json::Value;
@@ -54,7 +63,17 @@ pub use capability::{
     RawKind, Risk,
 };
 pub use config::{Configurable, Descriptor, PluginSpec, Registry};
+pub use context::{BrowserId, ContextHandle, ContextId, ContextSettings, LoadedExtension, PageId};
 pub use host::{HostInfo, HostKind};
+pub use nav::{MAX_REDIRECTS, NavDecision, NavOrigin, NavOutcome, Navigation};
+pub use network::{
+    NetRule, NetworkInterest, Outcome, ProtocolEvent, REDACTED, RequestDecision, RequestFilter,
+    RequestView, ResourceKind, ResponseView, RuleAction,
+};
+pub use task::{JobRunner, NoPrompt, NullSink, Prompt, Sink, Task, TaskContext};
+pub use testhook::{TestInfo, TestOutcome, TestVerdict};
+pub use timer::{Clock, Timer};
+
 pub use metadata::{Budgets, Category, Metadata, Phase, Seals};
 
 /// The result of a hook.
@@ -146,9 +165,31 @@ pub enum PluginError {
     /// Any other failure, with a message for the user.
     #[error("{0}")]
     Other(String),
+    /// A plugin cancelled a navigation the program asked for.
+    #[error("navigation to {url} cancelled by plugin {plugin}: {reason}")]
+    NavigationCancelled {
+        /// The plugin that cancelled it.
+        plugin: String,
+        /// The address the program asked for (after earlier plugins' redirects).
+        url: String,
+        /// The reason the plugin gave.
+        reason: String,
+    },
+    /// The browser handle or the host does not offer what the plugin asked for.
+    #[error("`{0}` is not supported here")]
+    NotSupported(String),
+    /// A time limit ran out.
+    #[error("timed out after {0:?}")]
+    Timeout(Duration),
 }
 
 impl PluginError {
+    /// The error for an operation `what` that a handle or the host does not
+    /// offer. The new handle methods return it by default.
+    pub fn unsupported(what: impl Into<String>) -> Self {
+        Self::NotSupported(what.into())
+    }
+
     /// A failure described by `message`, for a plugin to return from a hook.
     pub fn other(message: impl Into<String>) -> Self {
         Self::Other(message.into())
@@ -441,6 +482,37 @@ pub trait BrowserHandle: Send + Sync {
     /// The browser's family.
     fn family(&self) -> BrowserFamily;
 
+    /// A name for this browser in logs; it tells the browsers of a pool apart.
+    fn id(&self) -> BrowserId {
+        BrowserId::unknown()
+    }
+
+    /// The extensions the browser loaded, with the ids it gave them.
+    fn extensions(&self) -> Vec<LoadedExtension> {
+        Vec::new()
+    }
+
+    /// Makes a browser context. The handle is borrowed: a plugin cannot keep it.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::NotSupported`] unless the host offers contexts.
+    async fn new_context<'a>(
+        &'a self,
+        _settings: ContextSettings,
+    ) -> Result<Box<dyn ContextHandle + 'a>> {
+        Err(PluginError::unsupported("new_context"))
+    }
+
+    /// Opens a tab outside any context, at `url` if given.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::NotSupported`] unless the host lets plugins open tabs.
+    async fn new_page<'a>(&'a self, _url: Option<&str>) -> Result<Box<dyn PageHandle + 'a>> {
+        Err(PluginError::unsupported("new_page"))
+    }
+
     /// Sends a browser-level Chrome DevTools Protocol command and returns its
     /// result. Browsers without the protocol return an error.
     async fn send(&self, method: &str, params: Value) -> Result<Value>;
@@ -462,6 +534,60 @@ pub trait PageHandle: Send + Sync {
 
     /// Evaluates `expression` in the current document and returns its value.
     async fn evaluate(&self, expression: &str) -> Result<Value>;
+
+    /// A name for this tab in logs.
+    fn id(&self) -> PageId {
+        PageId::unknown()
+    }
+
+    /// The browser context the tab belongs to, if it has one.
+    fn context(&self) -> Option<ContextId> {
+        None
+    }
+
+    /// The tab's current address. The default evaluates `location.href`.
+    ///
+    /// # Errors
+    ///
+    /// If the evaluation fails or does not give text.
+    async fn url(&self) -> Result<String> {
+        match self.evaluate("location.href").await? {
+            Value::String(url) => Ok(url),
+            other => Err(PluginError::other(format!(
+                "the tab's address is not text: {other}"
+            ))),
+        }
+    }
+
+    /// Navigates the tab to `url`. The host runs
+    /// [`Plugin::before_navigate`] first, so a plugin cannot call this from
+    /// inside that hook.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::NotSupported`] unless the host lets plugins navigate.
+    async fn navigate(&self, _url: &str) -> Result<()> {
+        Err(PluginError::unsupported("navigate"))
+    }
+
+    /// Blocks requests whose URL matches these patterns. The host keeps one
+    /// list per tab and adds each plugin's patterns to it.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::NotSupported`] unless the host offers it.
+    async fn block_urls(&self, _patterns: &[String]) -> Result<()> {
+        Err(PluginError::unsupported("block_urls"))
+    }
+
+    /// Closes the tab.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::NotSupported`] unless the host lets plugins close tabs.
+    async fn close(&self) -> Result<()> {
+        Err(PluginError::unsupported("close"))
+    }
 }
 
 /// A plugin. Every hook is optional and does nothing by default.
@@ -513,6 +639,114 @@ pub trait Plugin: Send + Sync + 'static {
         Ok(())
     }
 
+    /// What the plugin wants to know about the network. The set reads it once,
+    /// when the plugin is added. The default is nothing.
+    fn network(&self) -> NetworkInterest {
+        NetworkInterest::none()
+    }
+
+    /// The names of the Chrome DevTools Protocol events the plugin wants in
+    /// [`on_protocol_event`](Self::on_protocol_event), such as
+    /// `Log.entryAdded`.
+    fn protocol_events(&self) -> &[&str] {
+        &[]
+    }
+
+    /// The work this plugin does when the user starts it by name. It needs
+    /// [`Capability::Task`].
+    fn task(&self) -> Option<&dyn Task> {
+        None
+    }
+
+    /// A kind of job that a batching plugin can hand to this one.
+    fn job_runner(&self) -> Option<&dyn JobRunner> {
+        None
+    }
+
+    /// A browser context is about to be made; the plugin may change its
+    /// settings. Reaches only plugins that hold [`Capability::Contexts`]. An
+    /// error stops the context from being made.
+    async fn before_context(&self, _settings: &mut ContextSettings) -> Result<()> {
+        Ok(())
+    }
+
+    /// A browser context exists, before the program uses it. Reaches only
+    /// plugins that hold [`Capability::Contexts`]. An error stops it.
+    async fn on_context_created(&self, _context: &dyn ContextHandle) -> Result<()> {
+        Ok(())
+    }
+
+    /// A browser context is gone. Reaches only plugins that hold
+    /// [`Capability::Contexts`]. An error is logged and teardown goes on.
+    async fn on_context_closed(&self, _id: &ContextId) -> Result<()> {
+        Ok(())
+    }
+
+    /// The program is about to navigate `page`. The plugin may let it go on,
+    /// redirect it (it needs [`Capability::PageNavigate`]) or cancel it. An
+    /// error cancels it too.
+    async fn before_navigate(
+        &self,
+        _page: &dyn PageHandle,
+        _navigation: &Navigation,
+    ) -> Result<NavDecision> {
+        Ok(NavDecision::Continue)
+    }
+
+    /// A navigation the program started has ended. An error is logged.
+    async fn after_navigate(&self, _page: &dyn PageHandle, _outcome: &NavOutcome) -> Result<()> {
+        Ok(())
+    }
+
+    /// A request the plugin declared in [`network`](Self::network)'s
+    /// `intercept` filters is paused. Reaches only plugins that hold
+    /// [`Capability::NetIntercept`]. An error blocks the request.
+    async fn on_request(&self, _request: &RequestView) -> Result<RequestDecision> {
+        Ok(RequestDecision::Continue)
+    }
+
+    /// A response the plugin declared in [`network`](Self::network)'s
+    /// `observe` filters arrived. Reaches only plugins that hold
+    /// [`Capability::NetObserve`]. An error is logged.
+    async fn on_response(&self, _response: &ResponseView<'_>) -> Result<()> {
+        Ok(())
+    }
+
+    /// A Chrome DevTools Protocol event the plugin named in
+    /// [`protocol_events`](Self::protocol_events) arrived. An error is logged.
+    async fn on_protocol_event(
+        &self,
+        _browser: &dyn BrowserHandle,
+        _event: &ProtocolEvent,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// The browser is about to close and still answers commands, so the plugin
+    /// can save state. [`on_close`](Self::on_close) follows for cleanup. An
+    /// error is logged.
+    async fn before_close(&self, _browser: &dyn BrowserHandle) -> Result<()> {
+        Ok(())
+    }
+
+    /// A test starts. Reaches only plugins that hold [`Capability::TestHooks`].
+    /// An error is logged.
+    async fn on_test_start(&self, _test: &TestInfo) -> Result<()> {
+        Ok(())
+    }
+
+    /// A test ended; `page` is its tab, still open, when it has one. The plugin
+    /// may fail the test. Reaches only plugins that hold
+    /// [`Capability::TestHooks`]. An error is logged and does not fail the test.
+    async fn on_test_end(
+        &self,
+        _test: &TestInfo,
+        _outcome: &TestOutcome,
+        _page: Option<&dyn PageHandle>,
+    ) -> Result<TestVerdict> {
+        Ok(TestVerdict::Keep)
+    }
+
     /// The browser is about to close.
     async fn on_close(&self) -> Result<()> {
         Ok(())
@@ -524,6 +758,19 @@ pub trait Plugin: Send + Sync + 'static {
 struct Entry {
     plugin: Arc<dyn Plugin>,
     grants: CapabilitySet,
+    /// What `plugin.network()` said when the plugin was added.
+    interest: NetworkInterest,
+}
+
+impl Entry {
+    fn new(plugin: Arc<dyn Plugin>, grants: CapabilitySet) -> Self {
+        let interest = plugin.network();
+        Self {
+            plugin,
+            grants,
+            interest,
+        }
+    }
 }
 
 /// One row of [`PluginSet::audit`].
@@ -568,6 +815,11 @@ fn default_grants(meta: &Metadata) -> CapabilitySet {
 pub struct PluginSet {
     entries: Vec<Entry>,
     strict: bool,
+    /// For the time budgets of hooks and for tasks; see [`PluginSet::with_timer`].
+    timer: Option<Arc<dyn Timer>>,
+    /// The run order, worked out on first use and thrown away when a plugin is
+    /// added: hooks like `on_request` run for every request.
+    order: OnceLock<Vec<usize>>,
 }
 
 impl fmt::Debug for PluginSet {
@@ -591,8 +843,8 @@ impl PluginSet {
     #[must_use]
     pub fn strict() -> Self {
         Self {
-            entries: Vec::new(),
             strict: true,
+            ..Self::default()
         }
     }
 
@@ -657,7 +909,8 @@ impl PluginSet {
         {
             return Err(PluginError::DuplicateName(plugin.name().to_owned()));
         }
-        self.entries.push(Entry { plugin, grants });
+        self.order = OnceLock::new();
+        self.entries.push(Entry::new(plugin, grants));
         Ok(self)
     }
 
@@ -674,16 +927,20 @@ impl PluginSet {
     pub fn for_launch(&self) -> Self {
         Self {
             strict: self.strict,
+            timer: self.timer.clone(),
+            order: OnceLock::new(),
             entries: self
                 .entries
                 .iter()
-                .map(|entry| Entry {
-                    plugin: entry
+                .map(|entry| {
+                    match entry
                         .plugin
                         .per_launch()
                         .filter(|fresh| fresh.name() == entry.plugin.name())
-                        .unwrap_or_else(|| Arc::clone(&entry.plugin)),
-                    grants: entry.grants.clone(),
+                    {
+                        Some(fresh) => Entry::new(fresh, entry.grants.clone()),
+                        None => entry.clone(),
+                    }
                 })
                 .collect(),
         }
@@ -727,17 +984,24 @@ impl PluginSet {
     /// The entries in run order. A set that fails [`check`](Self::check) runs
     /// in insertion order with `RUN_LAST` plugins at the end.
     fn ordered(&self) -> Vec<&Entry> {
-        match order::resolve(&self.nodes()) {
-            Ok(order) => order.into_iter().map(|i| &self.entries[i]).collect(),
-            Err(_) => {
-                let last = |e: &&Entry| e.plugin.requirements().contains(Requirements::RUN_LAST);
-                self.entries
-                    .iter()
-                    .filter(|e| !last(e))
-                    .chain(self.entries.iter().filter(last))
-                    .collect()
-            }
-        }
+        let order = self
+            .order
+            .get_or_init(|| match order::resolve(&self.nodes()) {
+                Ok(order) => order,
+                Err(_) => {
+                    let last = |i: &usize| {
+                        self.entries[*i]
+                            .plugin
+                            .requirements()
+                            .contains(Requirements::RUN_LAST)
+                    };
+                    (0..self.entries.len())
+                        .filter(|i| !last(i))
+                        .chain((0..self.entries.len()).filter(|i| last(i)))
+                        .collect()
+                }
+            });
+        order.iter().map(|&i| &self.entries[i]).collect()
     }
 
     /// Checks every plugin against the browser about to start on a host that
@@ -792,6 +1056,8 @@ impl PluginSet {
                     reason: reason.to_owned(),
                 });
             }
+            Self::check_declarations(entry, host)?;
+
             for capability in meta.capabilities.iter() {
                 if !host.supports(capability) {
                     return Err(PluginError::Unsupported {
@@ -1082,6 +1348,108 @@ fn verify_launch(
         }
     }
     Ok(())
+}
+
+/// What the set needs from a host and from a plugin's grants to run hooks.
+impl PluginSet {
+    /// Gives the set a timer. Tasks get a [`Clock`] over it
+    /// ([`clock`](Self::clock)), and the hook time limits a later release adds
+    /// apply only to a set that has one: without a timer nothing times out.
+    #[must_use]
+    pub fn with_timer(mut self, timer: Arc<dyn Timer>) -> Self {
+        self.timer = Some(timer);
+        self
+    }
+
+    /// A clock over the timer given to [`with_timer`](Self::with_timer), if any.
+    #[must_use]
+    pub fn clock(&self) -> Option<Clock> {
+        self.timer.clone().map(Clock::new)
+    }
+
+    /// Tells every plugin the browser is about to close, while it still
+    /// answers commands, so plugins can save state. Call it before
+    /// [`on_close`](Self::on_close). Every plugin runs even when one fails; the
+    /// failures are returned for the caller to log.
+    pub async fn before_close(&self, browser: &dyn BrowserHandle) -> Vec<PluginError> {
+        let mut failures = Vec::new();
+        for entry in self.ordered() {
+            if let Err(error) = self
+                .run_hook(entry, "before_close", entry.plugin.before_close(browser))
+                .await
+            {
+                failures.push(error);
+            }
+        }
+        failures
+    }
+
+    /// The plugins that hold `needed`, in run order. A hook that sits behind a
+    /// capability reaches only these.
+    fn holding(&self, needed: &Capability) -> Vec<&Entry> {
+        self.ordered()
+            .into_iter()
+            .filter(|entry| entry.grants.covers(needed))
+            .collect()
+    }
+
+    /// The entry of the plugin called `name`.
+    fn named(&self, name: &str) -> Result<&Entry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.plugin.name() == name)
+            .ok_or_else(|| PluginError::Config(format!("no plugin named `{name}` is in the set")))
+    }
+
+    /// Runs one hook of one plugin and names the plugin in its error. Every
+    /// dispatcher of the hooks added in 0.1.3 calls its hooks through here, so
+    /// that panic capture and time budgets have one place to go.
+    async fn run_hook<T>(
+        &self,
+        entry: &Entry,
+        hook: &'static str,
+        call: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        call.await
+            .map_err(|error| in_hook(entry.plugin.as_ref(), hook, error))
+    }
+
+    /// Checks what a plugin declares outside its metadata: network interest and
+    /// a task need the matching capability, granted and offered by the host.
+    fn check_declarations(entry: &Entry, host: &HostInfo) -> Result<()> {
+        let name = entry.plugin.name();
+        let interest = &entry.interest;
+        let mut needs = Vec::new();
+        if !interest.observe.is_empty() {
+            needs.push((Capability::NetObserve, "its `network()` observes responses"));
+        }
+        if !interest.rules.is_empty() || !interest.intercept.is_empty() {
+            needs.push((
+                Capability::NetIntercept,
+                "its `network()` declares rules or intercept filters",
+            ));
+        }
+        if entry.plugin.task().is_some() {
+            needs.push((Capability::Task, "it offers a task"));
+        }
+        for (capability, why) in needs {
+            if !host.supports(&capability) {
+                return Err(PluginError::Unsupported {
+                    plugin: name.to_owned(),
+                    capability: capability.to_string(),
+                    host: host.name(),
+                });
+            }
+            if !entry.grants.covers(&capability) {
+                return Err(denied(
+                    name,
+                    capability,
+                    &format!("{why} but it is not granted"),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// `error` as a [`PluginError::Hook`] of `plugin`, unless it already is one.

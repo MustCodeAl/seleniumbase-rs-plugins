@@ -2,10 +2,60 @@
 
 use std::sync::Arc;
 
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::metadata::Metadata;
 use crate::{Plugin, PluginError, PluginSet, Result};
+
+/// Reads the options of the plugin called `plugin` into its own typed struct,
+/// for [`Configurable::configure`].
+///
+/// `Value::Null`, which means no options, gives `T::default()`. Declare the
+/// struct with `#[serde(default, deny_unknown_fields)]`, and a misspelt option
+/// is an error instead of being ignored.
+///
+/// ```
+/// use seleniumbase_rs_plugin::config::options;
+/// use seleniumbase_rs_plugin::PluginError;
+/// use serde::Deserialize;
+/// use serde_json::json;
+///
+/// #[derive(Debug, Default, Deserialize, PartialEq)]
+/// #[serde(default, deny_unknown_fields)]
+/// struct Options {
+///     depth: u32,
+/// }
+///
+/// let none: Options = options("crawler", &serde_json::Value::Null)?;
+/// assert_eq!(none, Options::default());
+/// let some: Options = options("crawler", &json!({ "depth": 3 }))?;
+/// assert_eq!(some.depth, 3);
+/// let error = options::<Options>("crawler", &json!({ "dept": 3 })).unwrap_err();
+/// assert_eq!(error.to_string(), "plugin configuration: crawler: unknown option `dept`");
+/// # Ok::<(), PluginError>(())
+/// ```
+///
+/// # Errors
+///
+/// [`PluginError::Config`], naming the plugin: for an unknown option as
+/// ``crawler: unknown option `dept` ``, and for any other mistake with the
+/// message of the deserializer.
+pub fn options<T: DeserializeOwned + Default>(plugin: &str, options: &Value) -> Result<T> {
+    if options.is_null() {
+        return Ok(T::default());
+    }
+    serde_json::from_value(options.clone()).map_err(|error| {
+        let message = error.to_string();
+        let unknown = message
+            .strip_prefix("unknown field `")
+            .and_then(|rest| rest.split_once('`'));
+        PluginError::Config(match unknown {
+            Some((name, _)) => format!("{plugin}: unknown option `{name}`"),
+            None => format!("{plugin}: {message}"),
+        })
+    })
+}
 
 /// A plugin that can be built from a name and a TOML or JSON options value.
 pub trait Configurable: Plugin + Sized {
