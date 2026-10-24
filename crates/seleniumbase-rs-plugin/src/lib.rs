@@ -35,6 +35,88 @@
 //! # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
 //! ```
 
+//! # More hooks
+//!
+//! Since 0.1.3 a plugin can also watch and steer what the browser does:
+//!
+//! - **Navigation.** [`Plugin::before_navigate`] may let a navigation the
+//!   program starts go on, redirect it or cancel it; [`Plugin::after_navigate`]
+//!   sees how it ended.
+//! - **Network.** [`Plugin::network`] declares what the plugin cares about:
+//!   rules the host runs (block a URL, add a header) and filters for
+//!   [`Plugin::on_request`] (may block) and [`Plugin::on_response`] (only
+//!   watches). The host merges the declarations of all plugins
+//!   ([`PluginSet::interest`]) so the browser pauses only matching requests.
+//! - **Contexts.** [`Plugin::before_context`] changes the settings of a new
+//!   browser context, such as its proxy; [`Plugin::on_context_created`] and
+//!   [`Plugin::on_context_closed`] follow it.
+//! - **Tests.** [`Plugin::on_test_end`] sees a finished test, with its page
+//!   still open, and may fail it.
+//! - **Tasks.** [`Plugin::task`] is work the user starts by name, and
+//!   [`Plugin::job_runner`] a kind of job that a batching plugin hands out.
+//!
+//! Each hook that matters for security sits behind a capability: a plugin that
+//! does not hold [`Capability::Contexts`], [`Capability::NetIntercept`],
+//! [`Capability::NetObserve`] or [`Capability::TestHooks`] is not called for
+//! the hooks they guard. Every new trait method has a default body, so a plugin
+//! written for 0.1.0 compiles and behaves as before.
+//!
+//! ```
+//! use seleniumbase_rs_plugin::{
+//!     async_trait, Capability, Category, Metadata, NavDecision, Navigation, NetRule,
+//!     NetworkInterest, PageHandle, Plugin, PluginSet, RequestDecision, RequestFilter,
+//!     RequestView, ResourceKind, Result,
+//! };
+//! use seleniumbase_rs_plugin_testing::{block_on, drive_request, RecordingPage};
+//!
+//! /// Keeps tests away from production and blocks a tracker.
+//! struct Fence;
+//!
+//! #[async_trait]
+//! impl Plugin for Fence {
+//!     fn name(&self) -> &str {
+//!         "fence"
+//!     }
+//!
+//!     fn metadata(&self) -> Metadata {
+//!         Metadata::new(Category::Core).capability(Capability::NetIntercept)
+//!     }
+//!
+//!     // The host blocks these without calling the plugin.
+//!     fn network(&self) -> NetworkInterest {
+//!         NetworkInterest::none().rule(NetRule::block(
+//!             RequestFilter::any().url("https://tracker.example/*"),
+//!         ))
+//!     }
+//!
+//!     async fn before_navigate(
+//!         &self,
+//!         _page: &dyn PageHandle,
+//!         navigation: &Navigation,
+//!     ) -> Result<NavDecision> {
+//!         Ok(if navigation.url.starts_with("https://prod.example/") {
+//!             NavDecision::Cancel("tests must not touch production".into())
+//!         } else {
+//!             NavDecision::Continue
+//!         })
+//!     }
+//! }
+//!
+//! let set = PluginSet::strict().with(Fence)?;
+//!
+//! let page = RecordingPage::new();
+//! let error = block_on(set.before_navigate(&page, &Navigation::program("https://prod.example/pay")))
+//!     .unwrap_err();
+//! assert_eq!(
+//!     error.to_string(),
+//!     "navigation to https://prod.example/pay cancelled by plugin fence: tests must not touch production"
+//! );
+//!
+//! let request = RequestView::new("https://tracker.example/t.js", "GET", ResourceKind::Script);
+//! assert!(matches!(drive_request(&set, request), RequestDecision::Block(_)));
+//! # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
+//! ```
+
 mod capability;
 mod context;
 mod nav;
