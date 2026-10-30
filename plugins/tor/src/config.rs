@@ -57,33 +57,33 @@ impl ControlAuth {
     }
 
     /// Checks that exactly one method is named and that the name is usable.
-        pub(crate) fn validate(&self) -> Result<(), PluginError> {
-            let bad = |what: String| PluginError::Config(format!("tor: {what}"));
-            match (&self.cookie_path, &self.password_env) {
-                (Some(_), Some(_)) => Err(bad(
-                    "`control_auth` names both `cookie_path` and `password_env`; name exactly one"
-                        .to_owned(),
-                )),
-                (None, None) => Err(bad(
-                    "`control_auth` needs `cookie_path` (a cookie file) or `password_env` (the name \
+    pub(crate) fn validate(&self) -> Result<(), PluginError> {
+        let bad = |what: String| PluginError::Config(format!("tor: {what}"));
+        match (&self.cookie_path, &self.password_env) {
+            (Some(_), Some(_)) => Err(bad(
+                "`control_auth` names both `cookie_path` and `password_env`; name exactly one"
+                    .to_owned(),
+            )),
+            (None, None) => Err(bad(
+                "`control_auth` needs `cookie_path` (a cookie file) or `password_env` (the name \
                      of an environment variable that holds the password)"
-                        .to_owned(),
-                )),
-                (Some(path), None) if path.as_os_str().is_empty() => {
-                    Err(bad("`control_auth.cookie_path` is empty".to_owned()))
-                }
-                (None, Some(name))
-                    if name.is_empty()
-                        || name.contains(['=', '\0'])
-                        || name.chars().any(char::is_whitespace) =>
-                {
-                    Err(bad(format!(
-                        "`control_auth.password_env` {name:?} is not an environment variable name"
-                    )))
-                }
-                _ => Ok(()),
+                    .to_owned(),
+            )),
+            (Some(path), None) if path.as_os_str().is_empty() => {
+                Err(bad("`control_auth.cookie_path` is empty".to_owned()))
             }
+            (None, Some(name))
+                if name.is_empty()
+                    || name.contains(['=', '\0'])
+                    || name.chars().any(char::is_whitespace) =>
+            {
+                Err(bad(format!(
+                    "`control_auth.password_env` {name:?} is not an environment variable name"
+                )))
+            }
+            _ => Ok(()),
         }
+    }
 }
 
 /// The options of [`Tor`](crate::Tor): `[plugins.tor]` in a config file,
@@ -130,7 +130,6 @@ fn require_loopback(option: &str, address: SocketAddr) -> Result<(), PluginError
     }
     Ok(())
 }
-
 
 impl Default for TorConfig {
     fn default() -> Self {
@@ -187,25 +186,25 @@ impl TorConfig {
     /// [`PluginError::Config`] when `socks` or `control` is not a loopback
     /// address, when `control` has no `control_auth` or the other way round,
     /// or when `control_auth` does not name exactly one method.
-        pub fn validate(&self) -> Result<(), PluginError> {
-            require_loopback("socks", self.socks)?;
-            match (self.control, &self.control_auth) {
-                (Some(control), Some(auth)) => {
-                    require_loopback("control", control)?;
-                    auth.validate()
-                }
-                (Some(_), None) => Err(PluginError::Config(
-                    "tor: `control` needs `control_auth` (`{ cookie_path = \"...\" }` or \
+    pub fn validate(&self) -> Result<(), PluginError> {
+        require_loopback("socks", self.socks)?;
+        match (self.control, &self.control_auth) {
+            (Some(control), Some(auth)) => {
+                require_loopback("control", control)?;
+                auth.validate()
+            }
+            (Some(_), None) => Err(PluginError::Config(
+                "tor: `control` needs `control_auth` (`{ cookie_path = \"...\" }` or \
                      `{ password_env = \"...\" }`): the plugin never uses a control port without \
                      authenticating"
-                        .to_owned(),
-                )),
-                (None, Some(_)) => Err(PluginError::Config(
-                    "tor: `control_auth` is set but `control` is not; set `control` to the control \
+                    .to_owned(),
+            )),
+            (None, Some(_)) => Err(PluginError::Config(
+                "tor: `control_auth` is set but `control` is not; set `control` to the control \
                      port address, such as 127.0.0.1:9051"
-                        .to_owned(),
-                )),
-                (None, None) => Ok(()),
-            }
+                    .to_owned(),
+            )),
+            (None, None) => Ok(()),
         }
+    }
 }

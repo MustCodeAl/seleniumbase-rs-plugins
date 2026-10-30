@@ -46,14 +46,21 @@ fn the_name_reaches_tor_unresolved_with_the_isolation_credentials() {
             .write_all(&request_name("example.onion", 80))
             .await
             .unwrap();
-        assert_eq!(read_n(&mut client, 10).await, [5, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            read_n(&mut client, 10).await,
+            [5, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+        );
         // The tunnel carries bytes both ways.
         client.write_all(b"ping").await.unwrap();
         assert_eq!(read_n(&mut client, 4).await, b"ping");
 
         let seen = upstream.seen();
         assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].greeting, [5, 1, 2], "only user name and password is offered");
+        assert_eq!(
+            seen[0].greeting,
+            [5, 1, 2],
+            "only user name and password is offered"
+        );
         assert_eq!(seen[0].auth, auth_for(TOKEN));
         assert_eq!(
             seen[0].request,
@@ -101,12 +108,18 @@ fn one_forwarder_keeps_one_token_and_two_forwarders_never_share_one() {
         .unwrap();
         for forwarder in [&first, &first, &second] {
             let mut client = open(forwarder.local_addr()).await;
-            client.write_all(&request_name("a.example", 80)).await.unwrap();
+            client
+                .write_all(&request_name("a.example", 80))
+                .await
+                .unwrap();
             assert_eq!(read_n(&mut client, 10).await[1], 0);
         }
         let seen = upstream.seen();
         assert_eq!(seen.len(), 3);
-        assert_eq!(seen[0].auth, seen[1].auth, "streams of one forwarder may share circuits");
+        assert_eq!(
+            seen[0].auth, seen[1].auth,
+            "streams of one forwarder may share circuits"
+        );
         assert_ne!(seen[0].auth, seen[2].auth, "forwarders never share a token");
         assert_ne!(
             IsolationToken::random().unwrap(),
@@ -133,7 +146,11 @@ fn with_the_upstream_down_the_target_is_never_dialled() {
             expect_closed(&mut client).await;
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(target.accepted(), 0, "the forwarder never dials the target itself");
+        assert_eq!(
+            target.accepted(),
+            0,
+            "the forwarder never dials the target itself"
+        );
     });
 }
 
@@ -148,7 +165,10 @@ fn a_refusal_from_tor_is_relayed_and_the_target_is_not_dialled() {
             .write_all(&request_v4([127, 0, 0, 1], target.port()))
             .await
             .unwrap();
-        assert_eq!(read_n(&mut client, 10).await, [5, 5, 0, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            read_n(&mut client, 10).await,
+            [5, 5, 0, 1, 0, 0, 0, 0, 0, 0]
+        );
         expect_closed(&mut client).await;
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(target.accepted(), 0);
@@ -162,7 +182,10 @@ fn when_tor_refuses_the_credentials_or_the_method_the_browser_gets_a_failure() {
             let upstream = FakeSocksUpstream::start(answer).await;
             let forwarder = forwarder(upstream.addr()).await;
             let mut client = open(forwarder.local_addr()).await;
-            client.write_all(&request_name("a.example", 80)).await.unwrap();
+            client
+                .write_all(&request_name("a.example", 80))
+                .await
+                .unwrap();
             let reply = read_n(&mut client, 10).await;
             assert_eq!((reply[0], reply[1]), (5, 1), "{answer:?}");
             expect_closed(&mut client).await;
@@ -180,7 +203,10 @@ fn bind_and_udp_associate_get_reply_7_and_tor_is_not_asked() {
             let mut request = request_name("a.example", 80);
             request[1] = command;
             client.write_all(&request).await.unwrap();
-            assert_eq!(read_n(&mut client, 10).await, [5, 7, 0, 1, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(
+                read_n(&mut client, 10).await,
+                [5, 7, 0, 1, 0, 0, 0, 0, 0, 0]
+            );
             expect_closed(&mut client).await;
         }
         assert!(upstream.seen().is_empty());
@@ -193,8 +219,14 @@ fn an_unknown_address_type_gets_reply_8() {
         let upstream = FakeSocksUpstream::start(Answer::Succeed).await;
         let forwarder = forwarder(upstream.addr()).await;
         let mut client = open(forwarder.local_addr()).await;
-        client.write_all(&[5, 1, 0, 9, 1, 2, 3, 4, 0, 80]).await.unwrap();
-        assert_eq!(read_n(&mut client, 10).await, [5, 8, 0, 1, 0, 0, 0, 0, 0, 0]);
+        client
+            .write_all(&[5, 1, 0, 9, 1, 2, 3, 4, 0, 80])
+            .await
+            .unwrap();
+        assert_eq!(
+            read_n(&mut client, 10).await,
+            [5, 8, 0, 1, 0, 0, 0, 0, 0, 0]
+        );
         expect_closed(&mut client).await;
         assert!(upstream.seen().is_empty());
     });
@@ -237,7 +269,9 @@ fn bad_handshakes() -> Vec<Vec<u8>> {
     };
     for round in 0..120u64 {
         let length = usize::try_from(next() % 80).unwrap();
-        let mut bytes: Vec<u8> = (0..length).map(|_| u8::try_from(next() % 256).unwrap()).collect();
+        let mut bytes: Vec<u8> = (0..length)
+            .map(|_| u8::try_from(next() % 256).unwrap())
+            .collect();
         if round % 3 == 0 && bytes.len() > 8 {
             bytes[..3].copy_from_slice(&[5, 1, 0]);
             bytes[3] = 5;
@@ -266,7 +300,10 @@ fn garbage_and_truncated_handshakes_never_stop_the_forwarder_or_leak_connections
 
         // Still serving.
         let mut client = open(forwarder.local_addr()).await;
-        client.write_all(&request_name("ok.example", 80)).await.unwrap();
+        client
+            .write_all(&request_name("ok.example", 80))
+            .await
+            .unwrap();
         assert_eq!(read_n(&mut client, 10).await[1], 0);
         client.write_all(b"after").await.unwrap();
         assert_eq!(read_n(&mut client, 5).await, b"after");
@@ -358,7 +395,10 @@ fn dropping_the_forwarder_closes_its_tunnels_and_its_port() {
         let forwarder = forwarder(upstream.addr()).await;
         let address = forwarder.local_addr();
         let mut client = open(address).await;
-        client.write_all(&request_name("a.example", 80)).await.unwrap();
+        client
+            .write_all(&request_name("a.example", 80))
+            .await
+            .unwrap();
         assert_eq!(read_n(&mut client, 10).await[1], 0);
 
         drop(forwarder);

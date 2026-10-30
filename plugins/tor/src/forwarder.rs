@@ -24,7 +24,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::task::{JoinHandle, JoinSet};
 
-
 use crate::socks::{self, Credentials, Error, NO_ACCEPTABLE, NO_AUTH, rep};
 
 /// The user name sent to Tor. It starts with the `<torS0X>` marker, and the
@@ -50,25 +49,25 @@ impl IsolationToken {
     /// # Errors
     ///
     /// When the system's random number generator fails.
-        pub fn random() -> io::Result<Self> {
-            let mut bytes = [0u8; 16];
-            SystemRandom::new().fill(&mut bytes).map_err(|_| {
-                io::Error::other("the system random number generator failed")
-            })?;
-            Ok(Self(bytes))
-        }
+    pub fn random() -> io::Result<Self> {
+        let mut bytes = [0u8; 16];
+        SystemRandom::new()
+            .fill(&mut bytes)
+            .map_err(|_| io::Error::other("the system random number generator failed"))?;
+        Ok(Self(bytes))
+    }
 
     /// The password sent to Tor: `sbrs-` and the token in hexadecimal.
     #[must_use]
-        pub fn password(&self) -> String {
-            use std::fmt::Write as _;
-            self.0
-                .iter()
-                .fold(String::from("sbrs-"), |mut password, byte| {
-                    let _ = write!(password, "{byte:02x}");
-                    password
-                })
-        }
+    pub fn password(&self) -> String {
+        use std::fmt::Write as _;
+        self.0
+            .iter()
+            .fold(String::from("sbrs-"), |mut password, byte| {
+                let _ = write!(password, "{byte:02x}");
+                password
+            })
+    }
 
     /// The user name and password sent to Tor.
     pub(crate) fn credentials(&self) -> Credentials {
@@ -210,9 +209,7 @@ async fn negotiate(client: &mut TcpStream, shared: &Shared) -> Option<TcpStream>
         Err(Error::Io(_) | Error::Protocol(_)) => return None,
     };
     let Ok(mut upstream) = TcpStream::connect(shared.upstream).await else {
-        let _ = client
-            .write_all(&socks::reply(rep::GENERAL_FAILURE))
-            .await;
+        let _ = client.write_all(&socks::reply(rep::GENERAL_FAILURE)).await;
         return None;
     };
     match socks::client_connect(&mut upstream, &shared.credentials, &target).await {
@@ -222,19 +219,13 @@ async fn negotiate(client: &mut TcpStream, shared: &Shared) -> Option<TcpStream>
             return None;
         }
         Err(Error::Io(_) | Error::Protocol(_)) => {
-            let _ = client
-                .write_all(&socks::reply(rep::GENERAL_FAILURE))
-                .await;
+            let _ = client.write_all(&socks::reply(rep::GENERAL_FAILURE)).await;
             return None;
         }
     }
-    client
-        .write_all(&socks::reply(rep::SUCCEEDED))
-        .await
-        .ok()?;
+    client.write_all(&socks::reply(rep::SUCCEEDED)).await.ok()?;
     Some(upstream)
 }
-
 
 impl Forwarder {
     /// Starts a forwarder on a free loopback port. Its connections go to the
@@ -243,28 +234,28 @@ impl Forwarder {
     /// # Errors
     ///
     /// When no loopback port can be bound.
-        pub async fn start(
-            upstream: SocketAddr,
-            token: IsolationToken,
-            limits: Limits,
-        ) -> io::Result<Self> {
-            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
-            let address = listener.local_addr()?;
-            let max_connections = limits.max_connections.min(Semaphore::MAX_PERMITS);
-            let permits = Arc::new(Semaphore::new(max_connections));
-            let shared = Arc::new(Shared {
-                upstream,
-                credentials: token.credentials(),
-                handshake_timeout: limits.handshake_timeout,
-            });
-            let accept_loop = tokio::spawn(accept_loop(listener, Arc::clone(&permits), shared));
-            Ok(Self {
-                address,
-                permits,
-                max_connections,
-                accept_loop,
-            })
-        }
+    pub async fn start(
+        upstream: SocketAddr,
+        token: IsolationToken,
+        limits: Limits,
+    ) -> io::Result<Self> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+        let address = listener.local_addr()?;
+        let max_connections = limits.max_connections.min(Semaphore::MAX_PERMITS);
+        let permits = Arc::new(Semaphore::new(max_connections));
+        let shared = Arc::new(Shared {
+            upstream,
+            credentials: token.credentials(),
+            handshake_timeout: limits.handshake_timeout,
+        });
+        let accept_loop = tokio::spawn(accept_loop(listener, Arc::clone(&permits), shared));
+        Ok(Self {
+            address,
+            permits,
+            max_connections,
+            accept_loop,
+        })
+    }
 
     /// The loopback address the browser connects to.
     #[must_use]
@@ -282,8 +273,8 @@ impl Forwarder {
 
     /// How many connections are being served now.
     #[must_use]
-        pub fn active_connections(&self) -> usize {
-            self.max_connections
-                .saturating_sub(self.permits.available_permits())
-        }
+    pub fn active_connections(&self) -> usize {
+        self.max_connections
+            .saturating_sub(self.permits.available_permits())
+    }
 }

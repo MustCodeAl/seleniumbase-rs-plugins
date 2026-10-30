@@ -17,3 +17,4 @@ tokio.workspace = true
 
 [dev-dependencies]
 seleniumbase-rs-plugin-testing.workspace = true
+tempfile = "3.27"

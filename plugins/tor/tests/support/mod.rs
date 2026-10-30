@@ -3,6 +3,8 @@
 //! counts connections, and small socket helpers.
 #![allow(dead_code)]
 
+pub mod control;
+
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
@@ -97,12 +99,12 @@ async fn serve(mut s: TcpStream, answer: Answer, log: Arc<Mutex<Vec<Seen>>>) {
     let _ = serve_inner(&mut s, answer, &log).await;
 }
 
-async fn serve_inner(
-    s: &mut TcpStream,
-    answer: Answer,
-    log: &Mutex<Vec<Seen>>,
-) -> io::Result<()> {
-    let push = |entry: Seen| log.lock().unwrap_or_else(PoisonError::into_inner).push(entry);
+async fn serve_inner(s: &mut TcpStream, answer: Answer, log: &Mutex<Vec<Seen>>) -> io::Result<()> {
+    let push = |entry: Seen| {
+        log.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(entry)
+    };
     let mut greeting = read_vec(s, 2).await?;
     let methods = read_vec(s, usize::from(greeting[1])).await?;
     greeting.extend_from_slice(&methods);

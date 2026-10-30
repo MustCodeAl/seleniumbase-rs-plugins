@@ -735,6 +735,7 @@ dependencies = [
  "seleniumbase-rs-plugin-testing",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

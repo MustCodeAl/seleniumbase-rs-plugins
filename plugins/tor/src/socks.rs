@@ -63,6 +63,16 @@ pub(crate) enum Error {
     Refuse(u8),
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::Protocol(what) => f.write_str(what),
+            Self::Refuse(code) => write!(f, "refused with SOCKS5 reply code {code}"),
+        }
+    }
+}
+
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
@@ -101,7 +111,9 @@ pub(crate) async fn read_request<R: AsyncRead + Unpin>(reader: &mut R) -> Result
         return Err(Error::Protocol("the request is not SOCKS5"));
     }
     if reserved != 0 {
-        return Err(Error::Protocol("the reserved byte of the request is not zero"));
+        return Err(Error::Protocol(
+            "the reserved byte of the request is not zero",
+        ));
     }
     let host = match address_type {
         0x01 => {
@@ -304,12 +316,7 @@ mod tests {
                 read_greeting(&mut &[5u8, 2, 0, 2][..]).await.unwrap(),
                 [0, 2]
             );
-            assert!(
-                read_greeting(&mut &[5u8, 0][..])
-                    .await
-                    .unwrap()
-                    .is_empty()
-            );
+            assert!(read_greeting(&mut &[5u8, 0][..]).await.unwrap().is_empty());
         });
     }
 
@@ -322,10 +329,7 @@ mod tests {
             ));
             for cut in [&[][..], &[5][..], &[5, 2, 0][..]] {
                 let mut bytes = cut;
-                assert!(matches!(
-                    read_greeting(&mut bytes).await,
-                    Err(Error::Io(_))
-                ));
+                assert!(matches!(read_greeting(&mut bytes).await, Err(Error::Io(_))));
             }
         });
     }
@@ -357,12 +361,7 @@ mod tests {
         let bytes = encode_request(&name("example.onion", 80));
         assert_eq!(
             bytes,
-            [
-                &[5u8, 1, 0, 3, 13][..],
-                b"example.onion",
-                &[0, 80][..]
-            ]
-            .concat()
+            [&[5u8, 1, 0, 3, 13][..], b"example.onion", &[0, 80][..]].concat()
         );
     }
 
@@ -415,7 +414,11 @@ mod tests {
                 for cut in 0..full.len() {
                     let mut bytes = &full[..cut];
                     let outcome = read_request(&mut bytes).await;
-                    assert!(outcome.is_err(), "cut at {cut} of {}: {outcome:?}", full.len());
+                    assert!(
+                        outcome.is_err(),
+                        "cut at {cut} of {}: {outcome:?}",
+                        full.len()
+                    );
                 }
             }
         });
@@ -435,10 +438,10 @@ mod tests {
                     bytes[2] = 0;
                     bytes[3] = [1u8, 3, 4, rng.byte()][(rng.next() % 4) as usize];
                 }
-                if let Ok(target) = read_request(&mut &bytes[..]).await {
-                    if let Host::Name(name) = &target.host {
-                        assert!((1..=255).contains(&name.len()));
-                    }
+                if let Ok(target) = read_request(&mut &bytes[..]).await
+                    && let Host::Name(name) = &target.host
+                {
+                    assert!((1..=255).contains(&name.len()));
                 }
                 let _ = read_greeting(&mut &bytes[..]).await;
             }
@@ -448,7 +451,10 @@ mod tests {
     #[test]
     fn the_reply_has_the_code_and_a_zero_address() {
         assert_eq!(reply(0), [5, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(reply(rep::COMMAND_NOT_SUPPORTED), [5, 7, 0, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            reply(rep::COMMAND_NOT_SUPPORTED),
+            [5, 7, 0, 1, 0, 0, 0, 0, 0, 0]
+        );
     }
 
     /// A scripted upstream proxy on one end of an in-memory pipe. It answers

@@ -1,7 +1,9 @@
 //! Sends the browser's traffic through a local Tor daemon (work in progress).
 
 mod config;
+mod control;
 pub mod forwarder;
+pub mod health;
 mod socks;
 
 pub use config::{ControlAuth, Isolation, TorConfig};
