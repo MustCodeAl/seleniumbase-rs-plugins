@@ -172,7 +172,7 @@ impl Configurable for Imap {
     const NAME: &'static str = NAME;
 
     fn describe() -> Metadata {
-        Metadata::new(Category::Core)
+        Metadata::new(Category::Testing)
             .version(env!("CARGO_PKG_VERSION"))
             .summary("Waits for an email over IMAP and extracts its one-time code or link")
             .capabilities([Capability::Task, Capability::HostNet(NetScope::Any)])
