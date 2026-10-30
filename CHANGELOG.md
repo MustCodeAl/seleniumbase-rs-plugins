@@ -34,16 +34,29 @@ version; it stays 0.1.x until the next release.
   builds and then fails `PluginSet::check` and `check_with` with
   `PluginError::Conflict`. The registry tests build the other built-ins once
   with `crx` and once with `browser`, and assert the conflict.
-
-
-- `seleniumbase-rs-plugin-imap`: the `imap` plugin (category Core) with the task
+- `seleniumbase-rs-plugin-imap`: the `imap` plugin (category Testing) with the task
   `wait_for_email`. It waits in an IMAP mailbox, read only and over IMAPS (built
   on `async-imap`, `tokio-rustls` and `mail-parser`), for an email that matches
   `from`, `subject_contains` and `since_secs`, and records its sender, subject,
   date, text, first one-time code and first link. The password comes from the
-  environment variable `password_env` names and is never an option. Not yet
-  wired into `seleniumbase-rs-plugins-builtin`.
-
+  environment variable `password_env` names and is never an option. It
+  declares `task` and `host.net:any`, keeps no state (each wait opens its own
+  connection) and has no option to turn TLS or the certificate check off. A
+  WebDriver host offers no tasks, so `check_with` refuses a set with it there for
+  `task`, as it does every task plugin; the CDP engine runs it, and
+  `Imap::wait_for_email` can be called directly on any engine. An empty `host`
+  says "imap: `host` is required". The connection code has only been tried by
+  an `#[ignore]`d test that needs a real mailbox; no test drives it against a
+  server.
+- `seleniumbase-rs-plugins-builtin`: the `imap` feature and a registry entry
+  for it, last in `registry()` after `browser`, and the re-export
+  `seleniumbase_rs_plugins_builtin::imap`. The registry builds the plugin from
+  `host`, `user` and `password_env`; the variable must be set when it is built
+  and the error names it. The registry tests list it with the feature and not
+  without, refuse an unknown option, a `password` option, a missing host and an
+  unset password variable, check the set on the CDP engine, and add `imap` to
+  both strict sets of every built-in (the one with `crx` and the one with
+  `browser`). They use no network.
 - `seleniumbase-rs-plugin-shield`: the `shield` plugin (category Privacy). It
   turns off Chromium's background telemetry (verified switches and features, and
   at the `strict` level a resolver rule per browser-process host), sets privacy

@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use seleniumbase_rs_plugin::{
-    Capability, Clock, Configurable, Descriptor, NetScope, NoPrompt, PluginError, PluginSet,
-    PluginSpec, Registry, TaskContext, Timer,
+    BrowserFamily, Capability, Category, Clock, Configurable, Descriptor, Engine, HostInfo,
+    LaunchContext, NetScope, NoPrompt, PluginError, PluginSet, PluginSpec, Registry, TaskContext,
+    Timer,
 };
 use seleniumbase_rs_plugin_imap::{Imap, ImapConfig, Query};
 use seleniumbase_rs_plugin_testing::{ManualTimer, RecordingBrowser, VecSink, block_on};
@@ -55,7 +56,10 @@ fn the_defaults_are_the_documented_ones() {
 
 #[test]
 fn host_user_and_password_env_are_required() {
-    assert!(error_of(Imap::configure(&Value::Null)).contains("`host`"));
+    assert_eq!(
+        error_of(Imap::configure(&Value::Null)),
+        "imap: `host` is required"
+    );
     let mut c = config();
     c.user.clear();
     assert!(error_of(Imap::new_with(c, &|_| Some("x".into()))).contains("`user`"));
@@ -152,6 +156,72 @@ fn it_declares_a_task_and_host_network_and_nothing_more() {
         Capability::HostProcess,
     ] {
         assert!(!meta.capabilities.covers(&refused), "{refused}");
+    }
+}
+
+#[test]
+fn it_is_a_declared_testing_plugin_with_a_version_and_a_summary() {
+    assert_eq!(Imap::NAME, "imap");
+    let meta = Imap::describe();
+    assert!(meta.is_declared());
+    assert_eq!(meta.category, Some(Category::Testing));
+    assert_eq!(meta.version, env!("CARGO_PKG_VERSION"));
+    assert!(meta.summary.contains("IMAP"), "{}", meta.summary);
+}
+
+#[test]
+fn it_keeps_no_state_because_each_wait_opens_its_own_connection() {
+    let meta = Imap::describe();
+    for refused in [
+        Capability::State { persist: false },
+        Capability::State { persist: true },
+    ] {
+        assert!(!meta.capabilities.covers(&refused), "{refused}");
+    }
+}
+
+#[test]
+fn tls_and_the_certificate_are_not_options() {
+    // The connection is always TLS from the first byte and the certificate
+    // and host name are always checked, so there is nothing to turn off.
+    for option in ["tls", "ca_file", "starttls", "insecure", "verify"] {
+        let error = error_of(Imap::configure(&json!({ option: "none" })));
+        assert_eq!(error, format!("imap: unknown option `{option}`"));
+    }
+}
+
+fn context(engine: Engine, family: BrowserFamily) -> LaunchContext {
+    LaunchContext {
+        engine,
+        family,
+        headless: true,
+        connecting: false,
+    }
+}
+
+#[test]
+fn the_set_passes_the_check_on_the_cdp_engine() {
+    let set = PluginSet::strict().with(with_password(config())).unwrap();
+    let launch = context(Engine::Cdp, BrowserFamily::Chromium);
+    set.check(&launch).unwrap();
+    set.check_with(&launch, &HostInfo::cdp()).unwrap();
+}
+
+#[test]
+fn a_webdriver_host_refuses_the_task_like_every_other_task_plugin() {
+    // `HostInfo::supports` offers no tasks on WebDriver yet, so the set is
+    // refused there for `task`, before any browser starts. Nothing else of
+    // the plugin is a problem: it asks for no browser capability.
+    let set = PluginSet::strict().with(with_password(config())).unwrap();
+    for family in [BrowserFamily::Chromium, BrowserFamily::Firefox] {
+        let launch = context(Engine::WebDriver, family);
+        let error = set
+            .check_with(&launch, &HostInfo::webdriver(family))
+            .unwrap_err();
+        assert!(
+            matches!(&error, PluginError::Unsupported { capability, .. } if capability == "task"),
+            "{family:?}: {error:?}"
+        );
     }
 }
 

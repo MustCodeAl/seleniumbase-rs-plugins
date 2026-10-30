@@ -11,6 +11,7 @@ use seleniumbase_rs_plugins_builtin::registry;
     feature = "fetcher",
     feature = "extractor",
     feature = "batcher",
+    feature = "imap",
     feature = "browser",
     feature = "crawler"
 )))]
@@ -111,6 +112,7 @@ mod fetcher {
         feature = "crx",
         feature = "extractor",
         feature = "batcher",
+        feature = "imap",
         feature = "browser",
         feature = "crawler"
     )))]
@@ -155,6 +157,7 @@ mod extractor {
         feature = "crx",
         feature = "fetcher",
         feature = "batcher",
+        feature = "imap",
         feature = "browser",
         feature = "crawler"
     )))]
@@ -197,6 +200,7 @@ mod batcher {
         feature = "crx",
         feature = "fetcher",
         feature = "extractor",
+        feature = "imap",
         feature = "browser",
         feature = "crawler"
     )))]
@@ -239,6 +243,7 @@ mod crawler {
         feature = "crx",
         feature = "fetcher",
         feature = "extractor",
+        feature = "imap",
         feature = "browser",
         feature = "batcher"
     )))]
@@ -319,11 +324,126 @@ mod browser {
         feature = "fetcher",
         feature = "extractor",
         feature = "batcher",
+        feature = "imap",
         feature = "crawler"
     )))]
     #[test]
     fn it_adds_exactly_its_own_name() {
         assert_eq!(registry().names(), ["browser"]);
+    }
+}
+
+#[cfg(feature = "imap")]
+mod imap {
+    use super::registry;
+    use seleniumbase_rs_plugin::{BrowserFamily, Engine, HostInfo, LaunchContext};
+    use seleniumbase_rs_plugins_builtin::PluginSpec;
+    use serde_json::json;
+
+    /// A variable every process that runs these tests has, so the plugin finds
+    /// a "password" when it is built. Its value is never used: nothing here
+    /// connects to a mail server.
+    const SET_VARIABLE: &str = "PATH";
+
+    /// A variable that is not set anywhere.
+    const UNSET_VARIABLE: &str = "SBRS_BUILTIN_IMAP_TEST_UNSET_5C1E";
+
+    fn spec() -> PluginSpec {
+        PluginSpec::new("imap").options(json!({
+            "host": "imap.example.com",
+            "user": "me@example.com",
+            "password_env": SET_VARIABLE,
+        }))
+    }
+
+    #[test]
+    fn it_is_listed_and_declared() {
+        let registry = registry();
+        assert!(registry.names().contains(&"imap"));
+        assert!(registry.get("imap").unwrap().metadata().is_declared());
+    }
+
+    #[test]
+    fn it_builds_from_host_user_and_password_env_and_offers_its_task() {
+        let registry = registry();
+        let plugin = registry.build(&spec()).unwrap();
+        assert_eq!(plugin.name(), "imap");
+        assert!(plugin.task().is_some());
+        let set = registry.plugin_set(&[spec()]).unwrap();
+        assert_eq!(set.names(), ["imap"]);
+        assert_eq!(set.task_names(), ["imap"]);
+    }
+
+    #[test]
+    fn the_set_passes_the_check_on_the_cdp_engine() {
+        // A WebDriver host offers no tasks, so it refuses this plugin for
+        // `task`, as it does every task plugin (the plugin's own tests assert
+        // that); the CDP engine is the one that runs it as a plugin.
+        let set = registry().plugin_set(&[spec()]).unwrap();
+        for connecting in [false, true] {
+            let launch = LaunchContext {
+                engine: Engine::Cdp,
+                family: BrowserFamily::Chromium,
+                headless: true,
+                connecting,
+            };
+            set.check(&launch).unwrap();
+            set.check_with(&launch, &HostInfo::cdp()).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_wrong_option_fails_closed() {
+        let Err(error) = registry()
+            .build(&PluginSpec::new("imap").options(json!({ "hots": "imap.example.com" })))
+        else {
+            panic!("a typo must fail");
+        };
+        assert!(error.to_string().contains("hots"), "{error}");
+    }
+
+    #[test]
+    fn the_password_is_not_an_option() {
+        let Err(error) =
+            registry().build(&PluginSpec::new("imap").options(json!({ "password": "hunter2" })))
+        else {
+            panic!("a password option must be refused");
+        };
+        let message = error.to_string();
+        assert!(message.contains("password"), "{message}");
+        assert!(!message.contains("hunter2"), "{message}");
+    }
+
+    #[test]
+    fn a_missing_host_and_an_unset_password_variable_fail_the_build() {
+        let Err(error) = registry().build(&PluginSpec::new("imap")) else {
+            panic!("no host must fail");
+        };
+        assert!(error.to_string().contains("`host` is required"), "{error}");
+
+        let Err(error) = registry().build(&PluginSpec::new("imap").options(json!({
+            "host": "imap.example.com",
+            "user": "me@example.com",
+            "password_env": UNSET_VARIABLE,
+        }))) else {
+            panic!("an unset password variable must fail");
+        };
+        assert!(error.to_string().contains(UNSET_VARIABLE), "{error}");
+    }
+
+    #[cfg(not(any(
+        feature = "shield",
+        feature = "block-resources",
+        feature = "crx",
+        feature = "fetcher",
+        feature = "extractor",
+        feature = "batcher",
+        feature = "browser",
+        feature = "crawler"
+    )))]
+    #[test]
+    fn it_adds_exactly_its_own_name() {
+        assert_eq!(registry().names(), ["imap"]);
     }
 }
 
@@ -334,11 +454,12 @@ mod browser {
     feature = "fetcher",
     feature = "extractor",
     feature = "batcher",
+    feature = "imap",
     feature = "browser",
     feature = "crawler"
 ))]
 #[test]
-fn all_eight_are_listed_in_order() {
+fn all_nine_are_listed_in_order() {
     let registry = registry();
     assert_eq!(
         registry.names(),
@@ -350,7 +471,8 @@ fn all_eight_are_listed_in_order() {
             "extractor",
             "batcher",
             "crawler",
-            "browser"
+            "browser",
+            "imap"
         ]
     );
     for name in registry.names() {
@@ -362,7 +484,7 @@ fn all_eight_are_listed_in_order() {
 }
 
 /// `crx` and `browser` load extensions and cannot share a set, so the whole
-/// set of built-ins is checked as two sets of seven, one without each of them,
+/// set of built-ins is checked as two sets of eight, one without each of them,
 /// and the pair as a conflict.
 #[cfg(all(
     feature = "shield",
@@ -372,6 +494,7 @@ fn all_eight_are_listed_in_order() {
     feature = "extractor",
     feature = "batcher",
     feature = "crawler",
+    feature = "imap",
     feature = "browser"
 ))]
 mod all_built_ins {
@@ -400,11 +523,23 @@ mod all_built_ins {
             PluginSpec::new("extractor"),
             PluginSpec::new("batcher"),
             PluginSpec::new("crawler"),
+            imap(),
         ]
     }
 
     fn crx() -> PluginSpec {
         PluginSpec::new("crx").options(json!({ "files": [] }))
+    }
+
+    /// `imap` reads its password from the variable `password_env` names when it
+    /// is built. `PATH` is set in every process that runs these tests and its
+    /// value is never used: nothing here connects to a mail server.
+    fn imap() -> PluginSpec {
+        PluginSpec::new("imap").options(json!({
+            "host": "imap.example.com",
+            "user": "me@example.com",
+            "password_env": "PATH",
+        }))
     }
 
     fn set_of(specs: &[PluginSpec]) -> PluginSet {
@@ -428,6 +563,7 @@ mod all_built_ins {
                 "crx",
                 "extractor",
                 "fetcher",
+                "imap",
                 "shield"
             ]
         );
@@ -451,6 +587,7 @@ mod all_built_ins {
                 "crawler",
                 "extractor",
                 "fetcher",
+                "imap",
                 "shield"
             ]
         );

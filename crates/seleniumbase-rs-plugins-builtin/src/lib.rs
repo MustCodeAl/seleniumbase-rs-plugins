@@ -11,6 +11,7 @@
 //! | `batcher` | `batcher`, runs a list of jobs in tabs, in chunks, with retries and resume | `seleniumbase-rs-plugin-batcher` |
 //! | `crawler` | `crawler`, crawls a site you own or may test and reports broken pages | `seleniumbase-rs-plugin-crawler` |
 //! | `browser` | `browser`, loads extensions from `.zip` and `.crx` files and unpacked folders; cannot share a set with `crx` | `seleniumbase-rs-plugin-browser` |
+//! | `imap` | `imap`, waits for an email in an IMAP mailbox and extracts its one-time code or link (the task `wait_for_email`); the password comes from the environment variable `password_env` names | `seleniumbase-rs-plugin-imap` |
 //!
 //! No feature is on by default, so a build compiles only the plugins it asks
 //! for. Every plugin is also a crate of its own that depends on the plugin API
@@ -44,12 +45,14 @@ pub use seleniumbase_rs_plugin_crx as crx;
 pub use seleniumbase_rs_plugin_extractor as extractor;
 #[cfg(feature = "fetcher")]
 pub use seleniumbase_rs_plugin_fetcher as fetcher;
+#[cfg(feature = "imap")]
+pub use seleniumbase_rs_plugin_imap as imap;
 #[cfg(feature = "shield")]
 pub use seleniumbase_rs_plugin_shield as shield;
 
 /// A registry of every built-in plugin whose feature is on, in the order
 /// `shield`, `block-resources`, `crx`, `fetcher`, `extractor`, `batcher`,
-/// `crawler`, `browser`. Empty when no feature is on.
+/// `crawler`, `browser`, `imap`. Empty when no feature is on.
 #[must_use]
 pub fn registry() -> Registry {
     #[allow(unused_mut)]
@@ -85,6 +88,10 @@ pub fn registry() -> Registry {
     #[cfg(feature = "browser")]
     {
         registry = registry.with(Descriptor::of::<browser::BrowserSession>());
+    }
+    #[cfg(feature = "imap")]
+    {
+        registry = registry.with(Descriptor::of::<imap::Imap>());
     }
     registry
 }

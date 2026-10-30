@@ -69,11 +69,13 @@ fn bad(message: String) -> PluginError {
 impl ImapConfig {
     /// Checks every option; the error names the option.
     pub(crate) fn check(&self) -> Result<()> {
-        if self.host.is_empty()
-            || !self
-                .host
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
+        if self.host.is_empty() {
+            return Err(bad("`host` is required".into()));
+        }
+        if !self
+            .host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
         {
             return Err(bad(
                 "`host` must be a host name such as imap.example.com".into()
