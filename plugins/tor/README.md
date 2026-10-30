@@ -8,6 +8,8 @@ the automation, and lets that person test their own onion services.
 It protects the person who runs the automation. It is not a way around bans or
 rate limits, and it has no call that asks Tor for a new identity.
 
+## Turn it on
+
 ```sh
 cargo add seleniumbase-rs-plugin-tor --git https://github.com/MustCodeAl/seleniumbase-rs-plugins
 ```
@@ -20,6 +22,25 @@ let tor = Tor::new(TorConfig::new().isolation(Isolation::PerContext))?;
 let plugins = PluginSet::strict().with(tor)?;
 # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
 ```
+
+Or take it from the built-in registry: depend on
+`seleniumbase-rs-plugins-builtin` with the feature `tor`, which builds the plugin
+from its name and options (a `socks` or `control` address that is not loopback is
+refused when the set is built):
+
+```rust
+use seleniumbase_rs_plugins_builtin::{registry, PluginSpec};
+use serde_json::json;
+
+let set = registry().plugin_set(&[PluginSpec::new("tor").options(json!({
+    "socks": "127.0.0.1:9150",
+    "isolation": "per-context",
+}))])?;
+```
+
+Building the set needs no Tor daemon: the daemon is looked for when the browser
+launches. seleniumbase-rs reads the same options from `[plugins.tor]` in a config
+file, shown under [Options](#options).
 
 ## What you need
 
