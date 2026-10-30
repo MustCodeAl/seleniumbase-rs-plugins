@@ -637,6 +637,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs-plugin-browser"
+version = "0.1.3"
+dependencies = [
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-crx",
+ "seleniumbase-rs-plugin-testing",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "zip",
+]
+
+[[package]]
 name = "seleniumbase-rs-plugin-crawler"
 version = "0.1.3"
 dependencies = [

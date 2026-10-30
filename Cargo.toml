@@ -6,6 +6,7 @@ members = [
     "crates/seleniumbase-rs-plugins-builtin",
     "plugins/batcher",
     "plugins/block-resources",
+    "plugins/browser",
     "plugins/crawler",
     "plugins/crx",
     "plugins/extractor",
