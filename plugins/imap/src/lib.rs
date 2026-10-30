@@ -9,6 +9,11 @@
 //! starts, kept out of every error and every `Debug` output, and sent only to
 //! the server, over TLS.
 //!
+//! The name must start with `IMAP_`, `MAIL_` or `SB_`, so that a settings file
+//! cannot make the plugin send some other variable (such as `GITHUB_TOKEN`) to
+//! `host`; see [`ImapConfig`].
+
+//!
 //! ```
 //! use seleniumbase_rs_plugin::PluginSet;
 //! use seleniumbase_rs_plugin_imap::{Imap, ImapConfig};
@@ -83,7 +88,8 @@ impl Imap {
     /// # Errors
     ///
     /// [`PluginError::Config`](seleniumbase_rs_plugin::PluginError::Config)
-    /// for a bad option, or for a `password_env` that names no variable (the
+    /// for a bad option, for a `password_env` that does not start with `IMAP_`,
+    /// `MAIL_` or `SB_`, or for a `password_env` that names no variable (the
     /// message names it).
     pub fn new(config: ImapConfig) -> Result<Self> {
         Self::new_with(config, &|name| std::env::var(name).ok())
