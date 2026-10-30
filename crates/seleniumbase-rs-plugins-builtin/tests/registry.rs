@@ -494,10 +494,17 @@ mod imap {
         // A settings file that names `GITHUB_TOKEN` (or any variable that is
         // not `IMAP_`, `MAIL_` or `SB_`) would have the plugin send that
         // variable's value to `host`, so the build fails and the message names
-        // the rule and the variable, never its value. `PATH` is set in every
+        // the rule (and the variable's name when it looks like one), never its value. `PATH` is set in every
         // process that runs these tests.
         let value = std::env::var("PATH").expect("PATH is set");
-        for name in ["PATH", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "password"] {
+        let names = [
+            ("PATH", true),
+            ("GITHUB_TOKEN", true),
+            ("AWS_SECRET_ACCESS_KEY", true),
+            ("password", false),
+            ("Hunter2", false),
+        ];
+        for (name, echoed) in names {
             let Err(error) = registry().build(&PluginSpec::new("imap").options(json!({
                 "host": "attacker.example",
                 "user": "me@example.com",
@@ -510,7 +517,8 @@ mod imap {
                 message.contains("must name a variable starting with IMAP_, MAIL_ or SB_"),
                 "{message}"
             );
-            assert!(message.contains(&format!("`{name}`")), "{message}");
+            // Only a name that looks like a variable (capitals, digits, `_`) is repeated.
+            assert_eq!(message.contains(&format!("`{name}`")), echoed, "{message}");
             assert!(!message.contains(&value), "{message}");
         }
     }

@@ -101,6 +101,21 @@ fn a_missing_password_variable_is_named_in_the_error() {
 }
 
 #[test]
+fn a_missing_variable_whose_name_looks_like_a_password_is_not_repeated() {
+    // `SB_hunter2` has an accepted prefix, but its lowercase letters make it
+    // look like a pasted password rather than a variable name, so the error
+    // does not repeat it.
+    let mut c = config();
+    c.password_env = "SB_hunter2".into();
+    let message = error_of(Imap::new_with(c, &|_| None));
+    assert_eq!(
+        message,
+        "imap: the environment variable named by `password_env` is not set or is empty; it must hold the password or app password"
+    );
+    assert!(!message.contains("hunter2"), "{message}");
+}
+
+#[test]
 fn password_env_must_be_a_name_not_a_password() {
     for value in [
         "my secret pass",
@@ -125,23 +140,31 @@ fn password_env_must_be_a_name_not_a_password() {
 /// hold to `host`, so a name outside `IMAP_`, `MAIL_` and `SB_` (a token that
 /// another tool keeps in the environment, a different case, a longer word that
 /// merely contains a prefix) must never get as far as the server.
-const REFUSED_NAMES: &[&str] = &[
-    "GITHUB_TOKEN",
-    "AWS_SECRET_ACCESS_KEY",
-    "password",
-    "PATH",
-    "XIMAP_PASSWORD",
-    "SBRS_PASSWORD",
-    "SB",
-    "IMAP",
-    "imap_password",
-    "Mail_App_Password",
-    "sb_password",
+///
+/// The flag says whether the message may repeat the name: only a name that
+/// looks like an environment variable (capitals, digits and `_`) is repeated,
+/// so a password that someone pasted into the option is not printed back.
+const REFUSED_NAMES: &[(&str, bool)] = &[
+    ("GITHUB_TOKEN", true),
+    ("AWS_SECRET_ACCESS_KEY", true),
+    ("PATH", true),
+    ("XIMAP_PASSWORD", true),
+    ("SBRS_PASSWORD", true),
+    ("SB", true),
+    ("IMAP", true),
+    ("password", false),
+    ("imap_password", false),
+    ("Mail_App_Password", false),
+    ("sb_password", false),
+    ("hunter2", false),
+    ("Tr0ub4dor3", false),
 ];
 
 #[test]
 fn password_env_outside_the_prefixes_is_refused_without_reading_the_variable() {
-    for name in REFUSED_NAMES {
+    const RULE: &str =
+        "imap: `password_env` must name a variable starting with IMAP_, MAIL_ or SB_";
+    for (name, echoed) in REFUSED_NAMES {
         let read = Cell::new(false);
         let mut c = config();
         c.password_env = (*name).into();
@@ -149,12 +172,13 @@ fn password_env_outside_the_prefixes_is_refused_without_reading_the_variable() {
             read.set(true);
             Some("s3cret-app-password".into())
         }));
-        assert_eq!(
-            message,
-            format!(
-                "imap: `password_env` must name a variable starting with IMAP_, MAIL_ or SB_ (got `{name}`)"
-            )
-        );
+        if *echoed {
+            assert_eq!(message, format!("{RULE} (got `{name}`)"));
+        } else {
+            // Not a variable name: it may be a password, so it is not repeated.
+            assert_eq!(message, RULE);
+            assert!(!message.contains(&format!("`{name}`")), "{message}");
+        }
         assert!(!read.get(), "{name}: the variable was read");
         assert!(!message.contains("s3cret-app-password"), "{message}");
     }

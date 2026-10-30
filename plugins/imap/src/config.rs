@@ -37,7 +37,9 @@ const PASSWORD_ENV_PREFIXES: [&str; 3] = ["IMAP_", "MAIL_", "SB_"];
 /// with a cloned project must not be able to point the plugin at a variable
 /// that holds some other secret, such as `GITHUB_TOKEN`. Any other name is
 /// refused when the plugin is built; the error names the rule and the
-/// variable, and the variable is not read.
+/// variable (only when it looks like a variable name: capitals, digits and
+/// `_`, so that a password pasted into the option is not printed back), and
+/// the variable is not read.
 ///
 /// ```
 /// use seleniumbase_rs_plugin_imap::{Imap, ImapConfig};
@@ -96,6 +98,16 @@ fn bad(message: String) -> PluginError {
     PluginError::Config(format!("imap: {message}"))
 }
 
+/// Whether `name` looks like the name of an environment variable: capital
+/// ASCII letters, digits and `_` only. A `password_env` that does not may be a
+/// password that someone pasted into the option, so an error never repeats it.
+fn looks_like_variable_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
 impl ImapConfig {
     /// Checks every option; the error names the option.
     pub(crate) fn check(&self) -> Result<()> {
@@ -134,17 +146,20 @@ impl ImapConfig {
         }
         // The password is sent to `host`, so only names meant for this plugin
         // are allowed: a settings file must not be able to point it at a
-        // variable that holds some other secret. The name is echoed (it is a
-        // name, and the rule above has already ruled out most pasted
-        // passwords); the value of the variable is never read for a refused
-        // name.
+        // variable that holds some other secret. The name is repeated in the
+        // message only when it looks like a variable name (capitals, digits
+        // and `_`): anything else may be a password pasted into the option and
+        // is not printed back. The variable of a refused name is never read.
         if !PASSWORD_ENV_PREFIXES
             .iter()
             .any(|prefix| name.starts_with(prefix))
         {
-            return Err(bad(format!(
-                "`password_env` must name a variable starting with IMAP_, MAIL_ or SB_ (got `{name}`)"
-            )));
+            let rule = "`password_env` must name a variable starting with IMAP_, MAIL_ or SB_";
+            return Err(bad(if looks_like_variable_name(name) {
+                format!("{rule} (got `{name}`)")
+            } else {
+                rule.into()
+            }));
         }
 
         if self.mailbox.is_empty() || self.mailbox.chars().any(char::is_control) {
@@ -166,14 +181,20 @@ impl ImapConfig {
     /// The password, read through `get` from the variable `password_env` names.
     pub(crate) fn password_with(&self, get: &dyn Fn(&str) -> Option<String>) -> Result<Secret> {
         get(&self.password_env)
-            .filter(|value| !value.is_empty())
-            .map(Secret)
-            .ok_or_else(|| {
-                bad(format!(
-                    "the environment variable `{}` named by `password_env` is not set or is empty; it must hold the password or app password",
-                    self.password_env
-                ))
-            })
+                .filter(|value| !value.is_empty())
+                .map(Secret)
+                .ok_or_else(|| {
+                    // Repeated only when it looks like a variable name: anything
+                    // else may be a password pasted into the option.
+                    let name = if looks_like_variable_name(&self.password_env) {
+                        format!(" `{}`", self.password_env)
+                    } else {
+                        String::new()
+                    };
+                    bad(format!(
+                        "the environment variable{name} named by `password_env` is not set or is empty; it must hold the password or app password"
+                    ))
+                })
     }
 }
 
@@ -207,6 +228,25 @@ mod tests {
         let message = config.check().unwrap_err().to_string();
         for prefix in PASSWORD_ENV_PREFIXES {
             assert!(message.contains(prefix), "{message}");
+        }
+    }
+
+    #[test]
+    fn only_capitals_digits_and_underscores_look_like_a_variable_name() {
+        for name in ["PATH", "GITHUB_TOKEN", "SB_9", "_", "A1"] {
+            assert!(looks_like_variable_name(name), "{name}");
+        }
+        for name in [
+            "",
+            "path",
+            "Path",
+            "SB_hunter2",
+            "my secret",
+            "pa$$word",
+            "a=b",
+            "ÄB",
+        ] {
+            assert!(!looks_like_variable_name(name), "{name}");
         }
     }
 
