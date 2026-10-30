@@ -262,8 +262,12 @@ version; it stays 0.1.x until the next release.
   own certificate) once the operator passed `--plugin imap`. Any other name is
   refused when the plugin is built, before the variable is read, with
   "imap: `password_env` must name a variable starting with IMAP_, MAIL_ or SB_
-  (got `GITHUB_TOKEN`)": the message names the rule and the variable's name,
-  never a value. A configuration that named another variable, such as `PATH` in
+  (got `GITHUB_TOKEN`)": the message names the rule and never a value, and it
+  repeats the name only when it looks like a variable name (capitals, digits and
+  `_`); for a name with lowercase letters, which may be a password pasted into
+  the option, the message ends after `SB_`, and the "is not set or is empty"
+  error leaves such a name out the same way. A configuration that named another
+  variable, such as `PATH` in
   the registry tests, must rename it. The README, the `ImapConfig` and crate
   documentation and the tests say the same; the registry tests of
   `seleniumbase-rs-plugins-builtin` use `SB_BUILTIN_IMAP_TEST_PASSWORD`, which a

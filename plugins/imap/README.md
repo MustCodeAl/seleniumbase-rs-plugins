@@ -68,7 +68,10 @@ variable is read, and any other name fails when the plugin is built with
 imap: `password_env` must name a variable starting with IMAP_, MAIL_ or SB_ (got `GITHUB_TOKEN`)
 ```
 
-The message names the rule and the variable's name, never a value. Give the
+The message names the rule and never a value. It repeats the variable's name
+only when it looks like one (capitals, digits and `_`); a name with lowercase
+letters may be a password pasted into the option, so for that the message ends
+after `SB_`, and the "is not set" error leaves the name out the same way. Give the
 mailbox password a variable of its own, such as `MAIL_APP_PASSWORD`.
 
 ```toml

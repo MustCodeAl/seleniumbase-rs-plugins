@@ -11,7 +11,7 @@
 //! | `batcher` | `batcher`, runs a list of jobs in tabs, in chunks, with retries and resume | `seleniumbase-rs-plugin-batcher` |
 //! | `crawler` | `crawler`, crawls a site you own or may test and reports broken pages | `seleniumbase-rs-plugin-crawler` |
 //! | `browser` | `browser`, loads extensions from `.zip` and `.crx` files and unpacked folders; cannot share a set with `crx` | `seleniumbase-rs-plugin-browser` |
-//! | `imap` | `imap`, waits for an email in an IMAP mailbox and extracts its one-time code or link (the task `wait_for_email`); the password comes from the environment variable `password_env` names | `seleniumbase-rs-plugin-imap` |
+//! | `imap` | `imap`, waits for an email in an IMAP mailbox and extracts its one-time code or link (the task `wait_for_email`); the password comes from the environment variable `password_env` names (names starting with `IMAP_`, `MAIL_` or `SB_` only) | `seleniumbase-rs-plugin-imap` |
 //! | `tor` | `tor`, routes the browser through a Tor SOCKS listener you run yourself (sbrs never installs or starts Tor), with circuits of their own for each browser context; names are resolved by Tor | `seleniumbase-rs-plugin-tor` |
 //!
 //! No feature is on by default, so a build compiles only the plugins it asks
