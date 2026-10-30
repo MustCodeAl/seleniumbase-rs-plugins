@@ -747,6 +747,7 @@ dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-batcher",
  "seleniumbase-rs-plugin-block-resources",
+ "seleniumbase-rs-plugin-browser",
  "seleniumbase-rs-plugin-crawler",
  "seleniumbase-rs-plugin-crx",
  "seleniumbase-rs-plugin-extractor",

@@ -11,6 +11,7 @@ use seleniumbase_rs_plugins_builtin::registry;
     feature = "fetcher",
     feature = "extractor",
     feature = "batcher",
+    feature = "browser",
     feature = "crawler"
 )))]
 #[test]
@@ -110,6 +111,7 @@ mod fetcher {
         feature = "crx",
         feature = "extractor",
         feature = "batcher",
+        feature = "browser",
         feature = "crawler"
     )))]
     #[test]
@@ -153,6 +155,7 @@ mod extractor {
         feature = "crx",
         feature = "fetcher",
         feature = "batcher",
+        feature = "browser",
         feature = "crawler"
     )))]
     #[test]
@@ -194,6 +197,7 @@ mod batcher {
         feature = "crx",
         feature = "fetcher",
         feature = "extractor",
+        feature = "browser",
         feature = "crawler"
     )))]
     #[test]
@@ -235,11 +239,91 @@ mod crawler {
         feature = "crx",
         feature = "fetcher",
         feature = "extractor",
+        feature = "browser",
         feature = "batcher"
     )))]
     #[test]
     fn it_adds_exactly_its_own_name() {
         assert_eq!(registry().names(), ["crawler"]);
+    }
+}
+
+#[cfg(feature = "browser")]
+mod browser {
+    use super::registry;
+    use seleniumbase_rs_plugins_builtin::PluginSpec;
+    use serde_json::json;
+
+    #[test]
+    fn it_is_listed_and_builds_from_default_options() {
+        let registry = registry();
+        assert!(registry.names().contains(&"browser"));
+        assert!(registry.get("browser").unwrap().metadata().is_declared());
+        let plugin = registry.build(&PluginSpec::new("browser")).unwrap();
+        assert_eq!(plugin.name(), "browser");
+        let set = registry.plugin_set(&[PluginSpec::new("browser")]).unwrap();
+        assert_eq!(set.names(), ["browser"]);
+    }
+
+    #[test]
+    fn it_builds_from_its_two_options_and_the_set_passes_the_check() {
+        use seleniumbase_rs_plugin::{BrowserFamily, Engine, LaunchContext};
+
+        let spec = PluginSpec::new("browser").options(json!({
+            "extension_zip": "one.crx, two.zip",
+            "extension_dir": ["folder"],
+        }));
+        let registry = registry();
+        let plugin = registry.build(&spec).unwrap();
+        assert_eq!(plugin.name(), "browser");
+        // The paths are looked at at launch, not here; the set only needs the
+        // grants the options ask for (read the paths, write a temp folder).
+        let set = registry.plugin_set(&[spec]).unwrap();
+        set.check(&LaunchContext {
+            engine: Engine::Cdp,
+            family: BrowserFamily::Chromium,
+            headless: true,
+            connecting: false,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_wrong_option_fails_closed() {
+        let Err(error) =
+            registry().build(&PluginSpec::new("browser").options(json!({ "extension_zp": [] })))
+        else {
+            panic!("a typo must fail");
+        };
+        assert!(error.to_string().contains("extension_zp"), "{error}");
+    }
+
+    #[test]
+    fn the_options_that_are_not_built_yet_are_refused() {
+        // `wait_for_workers` and `session` wait for plugin API hooks, so the
+        // plugin refuses them instead of taking them and doing nothing.
+        for option in ["wait_for_workers", "session"] {
+            let Err(error) =
+                registry().build(&PluginSpec::new("browser").options(json!({ option: true })))
+            else {
+                panic!("`{option}` must be refused");
+            };
+            assert!(error.to_string().contains(option), "{error}");
+        }
+    }
+
+    #[cfg(not(any(
+        feature = "shield",
+        feature = "block-resources",
+        feature = "crx",
+        feature = "fetcher",
+        feature = "extractor",
+        feature = "batcher",
+        feature = "crawler"
+    )))]
+    #[test]
+    fn it_adds_exactly_its_own_name() {
+        assert_eq!(registry().names(), ["browser"]);
     }
 }
 
@@ -250,14 +334,11 @@ mod crawler {
     feature = "fetcher",
     feature = "extractor",
     feature = "batcher",
+    feature = "browser",
     feature = "crawler"
 ))]
 #[test]
-fn all_seven_are_listed_in_order_and_form_one_strict_set() {
-    use seleniumbase_rs_plugin::{BrowserFamily, Engine, LaunchContext};
-    use seleniumbase_rs_plugins_builtin::PluginSpec;
-    use serde_json::json;
-
+fn all_eight_are_listed_in_order() {
     let registry = registry();
     assert_eq!(
         registry.names(),
@@ -268,7 +349,8 @@ fn all_seven_are_listed_in_order_and_form_one_strict_set() {
             "fetcher",
             "extractor",
             "batcher",
-            "crawler"
+            "crawler",
+            "browser"
         ]
     );
     for name in registry.names() {
@@ -277,36 +359,124 @@ fn all_seven_are_listed_in_order_and_form_one_strict_set() {
             "{name}"
         );
     }
-    let set = registry
-        .plugin_set(&[
+}
+
+/// `crx` and `browser` load extensions and cannot share a set, so the whole
+/// set of built-ins is checked as two sets of seven, one without each of them,
+/// and the pair as a conflict.
+#[cfg(all(
+    feature = "shield",
+    feature = "block-resources",
+    feature = "crx",
+    feature = "fetcher",
+    feature = "extractor",
+    feature = "batcher",
+    feature = "crawler",
+    feature = "browser"
+))]
+mod all_built_ins {
+    use super::registry;
+    use seleniumbase_rs_plugin::{
+        BrowserFamily, Engine, HostInfo, LaunchContext, PluginError, PluginSet,
+    };
+    use seleniumbase_rs_plugins_builtin::PluginSpec;
+    use serde_json::json;
+
+    fn context() -> LaunchContext {
+        LaunchContext {
+            engine: Engine::Cdp,
+            family: BrowserFamily::Chromium,
+            headless: true,
+            connecting: false,
+        }
+    }
+
+    /// The specs of every built-in plugin except the two that load extensions.
+    fn common() -> Vec<PluginSpec> {
+        vec![
             PluginSpec::new("shield"),
             PluginSpec::new("block-resources"),
-            PluginSpec::new("crx").options(json!({ "files": [] })),
             PluginSpec::new("fetcher"),
             PluginSpec::new("extractor"),
             PluginSpec::new("batcher"),
             PluginSpec::new("crawler"),
-        ])
-        .unwrap();
-    set.check(&LaunchContext {
-        engine: Engine::Cdp,
-        family: BrowserFamily::Chromium,
-        headless: true,
-        connecting: false,
-    })
-    .unwrap();
-    let mut names = set.names();
-    names.sort_unstable();
-    assert_eq!(
-        names,
-        [
-            "batcher",
-            "block-resources",
-            "crawler",
-            "crx",
-            "extractor",
-            "fetcher",
-            "shield"
         ]
-    );
+    }
+
+    fn crx() -> PluginSpec {
+        PluginSpec::new("crx").options(json!({ "files": [] }))
+    }
+
+    fn set_of(specs: &[PluginSpec]) -> PluginSet {
+        registry().plugin_set(specs).unwrap()
+    }
+
+    #[test]
+    fn every_plugin_but_browser_forms_one_strict_set() {
+        let mut specs = common();
+        specs.push(crx());
+        let set = set_of(&specs);
+        set.check(&context()).unwrap();
+        let mut names = set.names();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "batcher",
+                "block-resources",
+                "crawler",
+                "crx",
+                "extractor",
+                "fetcher",
+                "shield"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_plugin_but_crx_forms_one_strict_set() {
+        let mut specs = common();
+        specs.push(PluginSpec::new("browser"));
+        let set = set_of(&specs);
+        set.check(&context()).unwrap();
+        set.check_with(&context(), &HostInfo::cdp()).unwrap();
+        let mut names = set.names();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "batcher",
+                "block-resources",
+                "browser",
+                "crawler",
+                "extractor",
+                "fetcher",
+                "shield"
+            ]
+        );
+    }
+
+    #[test]
+    fn crx_and_browser_conflict_in_a_checked_set() {
+        // The registry only refuses a duplicate name; the conflict the
+        // `browser` plugin declares with `crx` comes out when the set is
+        // checked, whichever one was added first.
+        for specs in [
+            [crx(), PluginSpec::new("browser")],
+            [PluginSpec::new("browser"), crx()],
+        ] {
+            let set = set_of(&specs);
+            assert_eq!(set.names().len(), 2);
+            let checked = set.check(&context());
+            assert!(
+                matches!(checked, Err(PluginError::Conflict { .. })),
+                "{checked:?}"
+            );
+            let with_host = set.check_with(&context(), &HostInfo::cdp());
+            assert!(
+                matches!(with_host, Err(PluginError::Conflict { .. })),
+                "{with_host:?}"
+            );
+        }
+    }
 }

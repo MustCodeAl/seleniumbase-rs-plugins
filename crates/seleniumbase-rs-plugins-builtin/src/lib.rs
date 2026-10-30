@@ -10,6 +10,7 @@
 //! | `extractor` | `extractor`, finds and extracts structured data from pages | `seleniumbase-rs-plugin-extractor` |
 //! | `batcher` | `batcher`, runs a list of jobs in tabs, in chunks, with retries and resume | `seleniumbase-rs-plugin-batcher` |
 //! | `crawler` | `crawler`, crawls a site you own or may test and reports broken pages | `seleniumbase-rs-plugin-crawler` |
+//! | `browser` | `browser`, loads extensions from `.zip` and `.crx` files and unpacked folders; cannot share a set with `crx` | `seleniumbase-rs-plugin-browser` |
 //!
 //! No feature is on by default, so a build compiles only the plugins it asks
 //! for. Every plugin is also a crate of its own that depends on the plugin API
@@ -33,6 +34,8 @@ pub use seleniumbase_rs_plugin::{Descriptor, PluginSpec, Registry};
 pub use seleniumbase_rs_plugin_batcher as batcher;
 #[cfg(feature = "block-resources")]
 pub use seleniumbase_rs_plugin_block_resources as block_resources;
+#[cfg(feature = "browser")]
+pub use seleniumbase_rs_plugin_browser as browser;
 #[cfg(feature = "crawler")]
 pub use seleniumbase_rs_plugin_crawler as crawler;
 #[cfg(feature = "crx")]
@@ -46,7 +49,7 @@ pub use seleniumbase_rs_plugin_shield as shield;
 
 /// A registry of every built-in plugin whose feature is on, in the order
 /// `shield`, `block-resources`, `crx`, `fetcher`, `extractor`, `batcher`,
-/// `crawler`. Empty when no feature is on.
+/// `crawler`, `browser`. Empty when no feature is on.
 #[must_use]
 pub fn registry() -> Registry {
     #[allow(unused_mut)]
@@ -78,6 +81,10 @@ pub fn registry() -> Registry {
     #[cfg(feature = "crawler")]
     {
         registry = registry.with(Descriptor::of::<crawler::Crawler>());
+    }
+    #[cfg(feature = "browser")]
+    {
+        registry = registry.with(Descriptor::of::<browser::BrowserSession>());
     }
     registry
 }
