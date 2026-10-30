@@ -7,6 +7,35 @@ version; it stays 0.1.x until the next release.
 
 ### Added
 
+- `seleniumbase-rs-plugin-browser`: the `browser` plugin (category Extension,
+  a Chromium browser the program starts). Its two options are Python
+  SeleniumBase's `--extension-zip` and `--extension-dir`: `extension_zip`
+  (`.zip` and `.crx` files; the format is read from the first bytes, a `.crx`
+  signature is not verified) and `extension_dir` (unpacked folders), each a list
+  or a comma-separated text. Archives are unpacked, with the code of the `crx`
+  plugin, into a temporary folder that belongs to one browser and is deleted
+  when it closes (each launch gets a fresh instance, so closing one pooled
+  browser deletes only its own); folders are loaded where they are and never
+  changed. Everything is checked before the browser starts: a path that does
+  not exist, a file of the wrong kind, a bad archive or an extension that is not
+  Manifest V3 fails the launch with the option and the path in the message, and
+  an explicit `--headless=old` is refused. The plugin adds the folders to
+  `LaunchSettings::extensions` and no switch. It conflicts with `crx`: one
+  extension loader per set. Capabilities: `LaunchExtensions`, `host.fs.read` for
+  the configured paths and, with archives, `host.fs.write` for a temporary
+  folder. The options `wait_for_workers`, `worker_timeout_secs`, `session`,
+  `save_on_close`, `interactive` and `pause_message` of the design are not
+  implemented yet (they need plugin API hooks that do not exist) and are
+  refused as unknown options. The tests drive the plugin through a plugin set;
+  nothing has run in a real Chrome.
+- `seleniumbase-rs-plugins-builtin`: the `browser` feature and a registry entry
+  for it, last in `registry()` after `crawler`. `browser` and `crx` cannot share
+  a set: `Registry::plugin_set` only refuses a duplicate name, so a set with both
+  builds and then fails `PluginSet::check` and `check_with` with
+  `PluginError::Conflict`. The registry tests build the other built-ins once
+  with `crx` and once with `browser`, and assert the conflict.
+
+
 - `seleniumbase-rs-plugin-imap`: the `imap` plugin (category Core) with the task
   `wait_for_email`. It waits in an IMAP mailbox, read only and over IMAPS (built
   on `async-imap`, `tokio-rustls` and `mail-parser`), for an email that matches
