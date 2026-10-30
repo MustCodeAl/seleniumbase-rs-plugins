@@ -732,6 +732,7 @@ version = "0.1.3"
 dependencies = [
  "ring",
  "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-browser",
  "seleniumbase-rs-plugin-testing",
  "serde",
  "serde_json",

@@ -25,6 +25,17 @@ pub fn run<F: Future>(future: F) -> F::Output {
         .block_on(future)
 }
 
+/// Runs a future on a small runtime whose clock stands still until every task
+/// waits for it, then jumps to the next timer.
+pub fn run_paused<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .expect("a runtime")
+        .block_on(future)
+}
+
 /// What one connection to the fake SocksPort sent.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Seen {

@@ -18,3 +18,5 @@ tokio.workspace = true
 [dev-dependencies]
 seleniumbase-rs-plugin-testing.workspace = true
 tempfile = "3.27"
+seleniumbase-rs-plugin-browser.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
