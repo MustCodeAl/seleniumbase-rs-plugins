@@ -1,6 +1,7 @@
 //! The plugin: options, registration, the task's input check, and one live
 //! test that needs a real mailbox.
 
+use std::cell::Cell;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -18,8 +19,9 @@ use serde_json::{Value, json};
 /// A change to a set of options, for the table of bad ones.
 type Change = fn(&mut ImapConfig);
 
-/// A variable that is not set anywhere.
-const UNSET: &str = "SBRS_IMAP_TEST_UNSET_8F3A21";
+/// A variable that is not set anywhere. Its name starts with `SB_`, so the
+/// check that refuses it is the unset one, not the prefix rule.
+const UNSET: &str = "SB_IMAP_TEST_UNSET_8F3A21";
 
 fn config() -> ImapConfig {
     ImapConfig {
@@ -93,14 +95,21 @@ fn a_missing_password_variable_is_named_in_the_error() {
     assert!(message.contains("password_env"), "{message}");
 
     let mut c = config();
-    c.password_env = "EMPTY_ONE".into();
+    c.password_env = "IMAP_EMPTY_ONE".into();
     let message = error_of(Imap::new_with(c, &|_| Some(String::new())));
-    assert!(message.contains("EMPTY_ONE"), "{message}");
+    assert!(message.contains("IMAP_EMPTY_ONE"), "{message}");
 }
 
 #[test]
 fn password_env_must_be_a_name_not_a_password() {
-    for value in ["my secret pass", "pa$$word", "1ABC", "a=b"] {
+    for value in [
+        "my secret pass",
+        "pa$$word",
+        "1ABC",
+        "a=b",
+        "SB_a=b",
+        "IMAP_my pass",
+    ] {
         let mut c = config();
         c.password_env = value.into();
         let message = error_of(Imap::new_with(c, &|_| Some("x".into())));
@@ -109,6 +118,82 @@ fn password_env_must_be_a_name_not_a_password() {
             "{message}"
         );
         assert!(!message.contains(value), "{message}");
+    }
+}
+
+/// Names that `password_env` must refuse: the plugin sends the password they
+/// hold to `host`, so a name outside `IMAP_`, `MAIL_` and `SB_` (a token that
+/// another tool keeps in the environment, a different case, a longer word that
+/// merely contains a prefix) must never get as far as the server.
+const REFUSED_NAMES: &[&str] = &[
+    "GITHUB_TOKEN",
+    "AWS_SECRET_ACCESS_KEY",
+    "password",
+    "PATH",
+    "XIMAP_PASSWORD",
+    "SBRS_PASSWORD",
+    "SB",
+    "IMAP",
+    "imap_password",
+    "Mail_App_Password",
+    "sb_password",
+];
+
+#[test]
+fn password_env_outside_the_prefixes_is_refused_without_reading_the_variable() {
+    for name in REFUSED_NAMES {
+        let read = Cell::new(false);
+        let mut c = config();
+        c.password_env = (*name).into();
+        let message = error_of(Imap::new_with(c, &|_| {
+            read.set(true);
+            Some("s3cret-app-password".into())
+        }));
+        assert_eq!(
+            message,
+            format!(
+                "imap: `password_env` must name a variable starting with IMAP_, MAIL_ or SB_ (got `{name}`)"
+            )
+        );
+        assert!(!read.get(), "{name}: the variable was read");
+        assert!(!message.contains("s3cret-app-password"), "{message}");
+    }
+}
+
+#[test]
+fn a_refused_name_fails_the_options_even_when_the_variable_is_set() {
+    // `PATH` is set in every process that runs these tests; a settings file
+    // that names it (or any other variable) must not get it sent to `host`.
+    let value = std::env::var("PATH").expect("PATH is set");
+    let message = error_of(Imap::configure(&json!({
+        "host": "attacker.example",
+        "user": "me@example.com",
+        "password_env": "PATH",
+    })));
+    assert!(message.starts_with("imap: "), "{message}");
+    assert!(
+        message.contains("starting with IMAP_, MAIL_ or SB_"),
+        "{message}"
+    );
+    assert!(message.contains("`PATH`"), "{message}");
+    assert!(!message.contains(&value), "{message}");
+}
+
+#[test]
+fn each_accepted_prefix_is_accepted() {
+    for name in [
+        "IMAP_PASSWORD",
+        "MAIL_APP_PASSWORD",
+        "SB_TEST_PASSWORD",
+        "IMAP_X1",
+        "MAIL_x",
+        "SB_9",
+    ] {
+        let mut c = config();
+        c.password_env = name.into();
+        let plugin = Imap::new_with(c, &|asked| (asked == name).then(|| "x".into()))
+            .unwrap_or_else(|error| panic!("{name} was refused: {error}"));
+        assert_eq!(plugin.config().password_env, name);
     }
 }
 
@@ -273,7 +358,8 @@ impl Timer for TokioTimer {
 
 /// Reads the newest unread email of the last day from a real mailbox. Run it
 /// with `SB_TEST_IMAP_HOST`, `SB_TEST_IMAP_USER` and `SB_TEST_IMAP_PASSWORD_ENV`
-/// (the NAME of the variable that holds the password) set:
+/// (the NAME of the variable that holds the password; it must start with
+/// `IMAP_`, `MAIL_` or `SB_`) set:
 /// `cargo test -p seleniumbase-rs-plugin-imap --test plugin -- --ignored`.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "needs a real mailbox: SB_TEST_IMAP_HOST, SB_TEST_IMAP_USER, SB_TEST_IMAP_PASSWORD_ENV"]

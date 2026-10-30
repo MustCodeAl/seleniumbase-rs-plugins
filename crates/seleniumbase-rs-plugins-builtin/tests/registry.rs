@@ -339,20 +339,64 @@ mod browser {
     }
 }
 
+/// The password variable the `imap` tests name, and a way to have it set.
+///
+/// `imap` only accepts a `password_env` that starts with `IMAP_`, `MAIL_` or
+/// `SB_`, and it needs the variable set when it is built. No process that runs
+/// these tests has such a variable, and a test cannot set one itself: the tests
+/// of a binary share one process and `std::env::set_var` is `unsafe` in edition
+/// 2024. So a test that needs the variable runs again in a child process of
+/// this same test binary that has it ([`imap_variable::with_password_set`]).
+/// Its value is never used: nothing here connects to a mail server.
+#[cfg(feature = "imap")]
+mod imap_variable {
+    use std::process::Command;
+
+    /// The variable the tests name as `password_env`.
+    pub const NAME: &str = "SB_BUILTIN_IMAP_TEST_PASSWORD";
+
+    /// Runs `body` with [`NAME`] set. `test` is the full libtest name of the
+    /// calling test (such as `imap::it_builds_from_options`): when the variable
+    /// is not set, that one test is run again in a child process that has it,
+    /// and the child's success is asserted.
+    pub fn with_password_set(test: &str, body: impl FnOnce()) {
+        if std::env::var_os(NAME).is_some() {
+            body();
+            return;
+        }
+        let exe = std::env::current_exe().expect("the path of this test binary");
+        let output = Command::new(exe)
+            .args([test, "--exact", "--nocapture", "--test-threads=1"])
+            .env(NAME, "not-a-real-password")
+            .output()
+            .expect("the test binary starts again");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // `--exact` with a name that matches nothing also exits 0, so the
+        // test that ran must be counted.
+        assert!(
+            output.status.success() && stdout.contains("test result: ok. 1 passed;"),
+            "{test} failed in the child process ({}):\n{stdout}\n{stderr}",
+            output.status
+        );
+    }
+}
+
 #[cfg(feature = "imap")]
 mod imap {
+    use super::imap_variable::with_password_set;
     use super::registry;
     use seleniumbase_rs_plugin::{BrowserFamily, Engine, HostInfo, LaunchContext};
     use seleniumbase_rs_plugins_builtin::PluginSpec;
     use serde_json::json;
 
-    /// A variable every process that runs these tests has, so the plugin finds
-    /// a "password" when it is built. Its value is never used: nothing here
-    /// connects to a mail server.
-    const SET_VARIABLE: &str = "PATH";
+    /// The variable the plugin finds a "password" in when it is built. Only a
+    /// test run through `with_password_set` has it; its value is never used:
+    /// nothing here connects to a mail server.
+    const SET_VARIABLE: &str = super::imap_variable::NAME;
 
-    /// A variable that is not set anywhere.
-    const UNSET_VARIABLE: &str = "SBRS_BUILTIN_IMAP_TEST_UNSET_5C1E";
+    /// A variable that is not set anywhere (its `SB_` prefix keeps the prefix rule out of the way).
+    const UNSET_VARIABLE: &str = "SB_BUILTIN_IMAP_TEST_UNSET_5C1E";
 
     fn spec() -> PluginSpec {
         PluginSpec::new("imap").options(json!({
@@ -371,31 +415,38 @@ mod imap {
 
     #[test]
     fn it_builds_from_host_user_and_password_env_and_offers_its_task() {
-        let registry = registry();
-        let plugin = registry.build(&spec()).unwrap();
-        assert_eq!(plugin.name(), "imap");
-        assert!(plugin.task().is_some());
-        let set = registry.plugin_set(&[spec()]).unwrap();
-        assert_eq!(set.names(), ["imap"]);
-        assert_eq!(set.task_names(), ["imap"]);
+        with_password_set(
+            "imap::it_builds_from_host_user_and_password_env_and_offers_its_task",
+            || {
+                let registry = registry();
+                let plugin = registry.build(&spec()).unwrap();
+                assert_eq!(plugin.name(), "imap");
+                assert!(plugin.task().is_some());
+                let set = registry.plugin_set(&[spec()]).unwrap();
+                assert_eq!(set.names(), ["imap"]);
+                assert_eq!(set.task_names(), ["imap"]);
+            },
+        );
     }
 
     #[test]
     fn the_set_passes_the_check_on_the_cdp_engine() {
-        // A WebDriver host offers no tasks, so it refuses this plugin for
-        // `task`, as it does every task plugin (the plugin's own tests assert
-        // that); the CDP engine is the one that runs it as a plugin.
-        let set = registry().plugin_set(&[spec()]).unwrap();
-        for connecting in [false, true] {
-            let launch = LaunchContext {
-                engine: Engine::Cdp,
-                family: BrowserFamily::Chromium,
-                headless: true,
-                connecting,
-            };
-            set.check(&launch).unwrap();
-            set.check_with(&launch, &HostInfo::cdp()).unwrap();
-        }
+        with_password_set("imap::the_set_passes_the_check_on_the_cdp_engine", || {
+            // A WebDriver host offers no tasks, so it refuses this plugin for
+            // `task`, as it does every task plugin (the plugin's own tests assert
+            // that); the CDP engine is the one that runs it as a plugin.
+            let set = registry().plugin_set(&[spec()]).unwrap();
+            for connecting in [false, true] {
+                let launch = LaunchContext {
+                    engine: Engine::Cdp,
+                    family: BrowserFamily::Chromium,
+                    headless: true,
+                    connecting,
+                };
+                set.check(&launch).unwrap();
+                set.check_with(&launch, &HostInfo::cdp()).unwrap();
+            }
+        });
     }
 
     #[test]
@@ -435,6 +486,33 @@ mod imap {
             panic!("an unset password variable must fail");
         };
         assert!(error.to_string().contains(UNSET_VARIABLE), "{error}");
+        assert!(error.to_string().contains("not set or is empty"), "{error}");
+    }
+
+    #[test]
+    fn a_password_variable_outside_the_prefixes_is_refused_even_when_it_is_set() {
+        // A settings file that names `GITHUB_TOKEN` (or any variable that is
+        // not `IMAP_`, `MAIL_` or `SB_`) would have the plugin send that
+        // variable's value to `host`, so the build fails and the message names
+        // the rule and the variable, never its value. `PATH` is set in every
+        // process that runs these tests.
+        let value = std::env::var("PATH").expect("PATH is set");
+        for name in ["PATH", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "password"] {
+            let Err(error) = registry().build(&PluginSpec::new("imap").options(json!({
+                "host": "attacker.example",
+                "user": "me@example.com",
+                "password_env": name,
+            }))) else {
+                panic!("{name} must be refused");
+            };
+            let message = error.to_string();
+            assert!(
+                message.contains("must name a variable starting with IMAP_, MAIL_ or SB_"),
+                "{message}"
+            );
+            assert!(message.contains(&format!("`{name}`")), "{message}");
+            assert!(!message.contains(&value), "{message}");
+        }
     }
 
     #[cfg(not(any(
@@ -685,6 +763,7 @@ fn all_ten_are_listed_in_order() {
     feature = "browser"
 ))]
 mod all_built_ins {
+    use super::imap_variable::{NAME as IMAP_VARIABLE, with_password_set};
     use super::registry;
     use seleniumbase_rs_plugin::{
         BrowserFamily, Engine, HostInfo, LaunchContext, PluginError, PluginSet,
@@ -720,13 +799,13 @@ mod all_built_ins {
     }
 
     /// `imap` reads its password from the variable `password_env` names when it
-    /// is built. `PATH` is set in every process that runs these tests and its
+    /// is built. Only a test run through `with_password_set` has the variable and its
     /// value is never used: nothing here connects to a mail server.
     fn imap() -> PluginSpec {
         PluginSpec::new("imap").options(json!({
             "host": "imap.example.com",
             "user": "me@example.com",
-            "password_env": "PATH",
+            "password_env": IMAP_VARIABLE,
         }))
     }
 
@@ -736,50 +815,60 @@ mod all_built_ins {
 
     #[test]
     fn every_plugin_but_browser_forms_one_strict_set() {
-        let mut specs = common();
-        specs.push(crx());
-        let set = set_of(&specs);
-        set.check(&context()).unwrap();
-        let mut names = set.names();
-        names.sort_unstable();
-        assert_eq!(
-            names,
-            [
-                "batcher",
-                "block-resources",
-                "crawler",
-                "crx",
-                "extractor",
-                "fetcher",
-                "imap",
-                "shield",
-                "tor"
-            ]
+        with_password_set(
+            "all_built_ins::every_plugin_but_browser_forms_one_strict_set",
+            || {
+                let mut specs = common();
+                specs.push(crx());
+                let set = set_of(&specs);
+                set.check(&context()).unwrap();
+                let mut names = set.names();
+                names.sort_unstable();
+                assert_eq!(
+                    names,
+                    [
+                        "batcher",
+                        "block-resources",
+                        "crawler",
+                        "crx",
+                        "extractor",
+                        "fetcher",
+                        "imap",
+                        "shield",
+                        "tor"
+                    ]
+                );
+            },
         );
     }
 
     #[test]
     fn every_plugin_but_crx_forms_one_strict_set() {
-        let mut specs = common();
-        specs.push(PluginSpec::new("browser"));
-        let set = set_of(&specs);
-        set.check(&context()).unwrap();
-        set.check_with(&context(), &HostInfo::cdp()).unwrap();
-        let mut names = set.names();
-        names.sort_unstable();
-        assert_eq!(
-            names,
-            [
-                "batcher",
-                "block-resources",
-                "browser",
-                "crawler",
-                "extractor",
-                "fetcher",
-                "imap",
-                "shield",
-                "tor"
-            ]
+        with_password_set(
+            "all_built_ins::every_plugin_but_crx_forms_one_strict_set",
+            || {
+                let mut specs = common();
+                specs.push(PluginSpec::new("browser"));
+                let set = set_of(&specs);
+                set.check(&context()).unwrap();
+                set.check_with(&context(), &HostInfo::cdp()).unwrap();
+                let mut names = set.names();
+                names.sort_unstable();
+                assert_eq!(
+                    names,
+                    [
+                        "batcher",
+                        "block-resources",
+                        "browser",
+                        "crawler",
+                        "extractor",
+                        "fetcher",
+                        "imap",
+                        "shield",
+                        "tor"
+                    ]
+                );
+            },
         );
     }
 
