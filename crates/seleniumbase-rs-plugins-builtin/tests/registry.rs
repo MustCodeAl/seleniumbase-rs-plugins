@@ -13,6 +13,7 @@ use seleniumbase_rs_plugins_builtin::registry;
     feature = "batcher",
     feature = "imap",
     feature = "browser",
+    feature = "tor",
     feature = "crawler"
 )))]
 #[test]
@@ -114,6 +115,7 @@ mod fetcher {
         feature = "batcher",
         feature = "imap",
         feature = "browser",
+        feature = "tor",
         feature = "crawler"
     )))]
     #[test]
@@ -159,6 +161,7 @@ mod extractor {
         feature = "batcher",
         feature = "imap",
         feature = "browser",
+        feature = "tor",
         feature = "crawler"
     )))]
     #[test]
@@ -202,6 +205,7 @@ mod batcher {
         feature = "extractor",
         feature = "imap",
         feature = "browser",
+        feature = "tor",
         feature = "crawler"
     )))]
     #[test]
@@ -245,6 +249,7 @@ mod crawler {
         feature = "extractor",
         feature = "imap",
         feature = "browser",
+        feature = "tor",
         feature = "batcher"
     )))]
     #[test]
@@ -325,6 +330,7 @@ mod browser {
         feature = "extractor",
         feature = "batcher",
         feature = "imap",
+        feature = "tor",
         feature = "crawler"
     )))]
     #[test]
@@ -439,11 +445,189 @@ mod imap {
         feature = "extractor",
         feature = "batcher",
         feature = "browser",
+        feature = "tor",
         feature = "crawler"
     )))]
     #[test]
     fn it_adds_exactly_its_own_name() {
         assert_eq!(registry().names(), ["imap"]);
+    }
+}
+
+#[cfg(feature = "tor")]
+mod tor {
+    use super::registry;
+    use seleniumbase_rs_plugin::{BrowserFamily, Engine, HostInfo, LaunchContext, PluginError};
+    use seleniumbase_rs_plugins_builtin::PluginSpec;
+    use serde_json::json;
+
+    fn context(connecting: bool) -> LaunchContext {
+        LaunchContext {
+            engine: Engine::Cdp,
+            family: BrowserFamily::Chromium,
+            headless: true,
+            connecting,
+        }
+    }
+
+    #[test]
+    fn it_is_listed_and_declared() {
+        let registry = registry();
+        assert!(registry.names().contains(&"tor"));
+        assert!(registry.get("tor").unwrap().metadata().is_declared());
+    }
+
+    #[test]
+    fn it_builds_from_default_options_and_from_browser_isolation() {
+        let registry = registry();
+        let plugin = registry.build(&PluginSpec::new("tor")).unwrap();
+        assert_eq!(plugin.name(), "tor");
+        let set = registry.plugin_set(&[PluginSpec::new("tor")]).unwrap();
+        assert_eq!(set.names(), ["tor"]);
+
+        let spec = PluginSpec::new("tor").options(json!({ "isolation": "browser" }));
+        let plugin = registry.build(&spec).unwrap();
+        assert_eq!(plugin.name(), "tor");
+        let set = registry.plugin_set(&[spec]).unwrap();
+        assert_eq!(set.names(), ["tor"]);
+    }
+
+    #[test]
+    fn the_re_export_is_the_plugin_crate_and_its_default_is_the_local_socks_port() {
+        use seleniumbase_rs_plugin::Configurable;
+        use seleniumbase_rs_plugins_builtin::tor::{Isolation, Tor};
+
+        let default = Tor::configure(&serde_json::Value::Null).unwrap();
+        assert_eq!(default.config().socks, "127.0.0.1:9050".parse().unwrap());
+        assert_eq!(default.config().isolation, Isolation::PerContext);
+
+        let browser = Tor::configure(&json!({ "isolation": "browser" })).unwrap();
+        assert_eq!(browser.config().isolation, Isolation::Browser);
+    }
+
+    #[test]
+    fn the_set_passes_the_check_without_a_tor_daemon() {
+        // `check` reads declarations only; the SOCKS probe runs in
+        // `before_launch`, so no listener is needed here.
+        let set = registry().plugin_set(&[PluginSpec::new("tor")]).unwrap();
+        set.check(&context(false)).unwrap();
+        set.check_with(&context(false), &HostInfo::cdp()).unwrap();
+    }
+
+    #[test]
+    fn the_set_refuses_a_browser_the_program_attaches_to() {
+        let set = registry().plugin_set(&[PluginSpec::new("tor")]).unwrap();
+        let error = set.check(&context(true)).unwrap_err();
+        assert!(
+            matches!(&error, PluginError::Requirement { plugin, .. } if plugin == "tor"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_control_port_with_a_cookie_file_builds_and_passes_the_check() {
+        // The cookie file is the one file the plugin reads: it comes out as a
+        // declared `host.fs.read`, which the strict set grants. The file is
+        // not opened here.
+        let spec = PluginSpec::new("tor").options(json!({
+            "control": "127.0.0.1:9051",
+            "control_auth": { "cookie_path": "/var/run/tor/control.authcookie" },
+        }));
+        let set = registry().plugin_set(&[spec]).unwrap();
+        set.check(&context(false)).unwrap();
+        set.check_with(&context(false), &HostInfo::cdp()).unwrap();
+    }
+
+    #[test]
+    fn a_socks_address_that_is_not_loopback_is_refused() {
+        for address in ["192.168.1.10:9050", "10.0.0.1:9050", "0.0.0.0:9050"] {
+            let Err(error) =
+                registry().build(&PluginSpec::new("tor").options(json!({ "socks": address })))
+            else {
+                panic!("`{address}` must be refused");
+            };
+            assert!(matches!(error, PluginError::Config(_)), "{error:?}");
+            let message = error.to_string();
+            assert!(
+                message.contains("socks") && message.contains("loopback"),
+                "{message}"
+            );
+        }
+        // A loopback address on another port is the usual Tor Browser setup.
+        registry()
+            .build(&PluginSpec::new("tor").options(json!({ "socks": "127.0.0.1:9150" })))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_wrong_option_fails_closed() {
+        let Err(error) =
+            registry().build(&PluginSpec::new("tor").options(json!({ "sock": "127.0.0.1:9050" })))
+        else {
+            panic!("a typo must fail");
+        };
+        assert!(error.to_string().contains("sock"), "{error}");
+
+        let Err(error) =
+            registry().build(&PluginSpec::new("tor").options(json!({ "isolation": "tab" })))
+        else {
+            panic!("an unknown isolation must fail");
+        };
+        assert!(error.to_string().contains("per-context"), "{error}");
+    }
+
+    #[test]
+    fn the_control_password_is_not_an_option() {
+        let Err(error) = registry().build(&PluginSpec::new("tor").options(json!({
+            "control": "127.0.0.1:9051",
+            "control_auth": { "password": "hunter2" },
+        }))) else {
+            panic!("a password option must be refused");
+        };
+        let message = error.to_string();
+        assert!(message.contains("password"), "{message}");
+        assert!(!message.contains("hunter2"), "{message}");
+    }
+
+    #[cfg(not(any(
+        feature = "shield",
+        feature = "block-resources",
+        feature = "crx",
+        feature = "fetcher",
+        feature = "extractor",
+        feature = "batcher",
+        feature = "imap",
+        feature = "browser",
+        feature = "crawler"
+    )))]
+    #[test]
+    fn it_adds_exactly_its_own_name() {
+        assert_eq!(registry().names(), ["tor"]);
+    }
+}
+
+/// `tor` is a privacy plugin (the Enforce phase) and `browser` an extension
+/// plugin (the Normal phase), so a set runs `browser` first whichever one was
+/// added first, and the two pass the check together.
+#[cfg(all(feature = "browser", feature = "tor"))]
+#[test]
+fn a_set_with_browser_and_tor_runs_browser_first() {
+    use seleniumbase_rs_plugin::{BrowserFamily, Engine, LaunchContext};
+    use seleniumbase_rs_plugins_builtin::PluginSpec;
+
+    let launch = LaunchContext {
+        engine: Engine::Cdp,
+        family: BrowserFamily::Chromium,
+        headless: true,
+        connecting: false,
+    };
+    for specs in [
+        [PluginSpec::new("browser"), PluginSpec::new("tor")],
+        [PluginSpec::new("tor"), PluginSpec::new("browser")],
+    ] {
+        let set = registry().plugin_set(&specs).unwrap();
+        assert_eq!(set.names(), ["browser", "tor"]);
+        set.check(&launch).unwrap();
     }
 }
 
@@ -456,10 +640,11 @@ mod imap {
     feature = "batcher",
     feature = "imap",
     feature = "browser",
+    feature = "tor",
     feature = "crawler"
 ))]
 #[test]
-fn all_nine_are_listed_in_order() {
+fn all_ten_are_listed_in_order() {
     let registry = registry();
     assert_eq!(
         registry.names(),
@@ -472,7 +657,8 @@ fn all_nine_are_listed_in_order() {
             "batcher",
             "crawler",
             "browser",
-            "imap"
+            "imap",
+            "tor"
         ]
     );
     for name in registry.names() {
@@ -484,7 +670,7 @@ fn all_nine_are_listed_in_order() {
 }
 
 /// `crx` and `browser` load extensions and cannot share a set, so the whole
-/// set of built-ins is checked as two sets of eight, one without each of them,
+/// set of built-ins is checked as two sets of nine, one without each of them,
 /// and the pair as a conflict.
 #[cfg(all(
     feature = "shield",
@@ -495,6 +681,7 @@ fn all_nine_are_listed_in_order() {
     feature = "batcher",
     feature = "crawler",
     feature = "imap",
+    feature = "tor",
     feature = "browser"
 ))]
 mod all_built_ins {
@@ -524,6 +711,7 @@ mod all_built_ins {
             PluginSpec::new("batcher"),
             PluginSpec::new("crawler"),
             imap(),
+            PluginSpec::new("tor"),
         ]
     }
 
@@ -564,7 +752,8 @@ mod all_built_ins {
                 "extractor",
                 "fetcher",
                 "imap",
-                "shield"
+                "shield",
+                "tor"
             ]
         );
     }
@@ -588,7 +777,8 @@ mod all_built_ins {
                 "extractor",
                 "fetcher",
                 "imap",
-                "shield"
+                "shield",
+                "tor"
             ]
         );
     }

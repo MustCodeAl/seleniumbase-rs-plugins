@@ -12,6 +12,7 @@
 //! | `crawler` | `crawler`, crawls a site you own or may test and reports broken pages | `seleniumbase-rs-plugin-crawler` |
 //! | `browser` | `browser`, loads extensions from `.zip` and `.crx` files and unpacked folders; cannot share a set with `crx` | `seleniumbase-rs-plugin-browser` |
 //! | `imap` | `imap`, waits for an email in an IMAP mailbox and extracts its one-time code or link (the task `wait_for_email`); the password comes from the environment variable `password_env` names | `seleniumbase-rs-plugin-imap` |
+//! | `tor` | `tor`, routes the browser through a Tor SOCKS listener you run yourself (sbrs never installs or starts Tor), with circuits of their own for each browser context; names are resolved by Tor | `seleniumbase-rs-plugin-tor` |
 //!
 //! No feature is on by default, so a build compiles only the plugins it asks
 //! for. Every plugin is also a crate of its own that depends on the plugin API
@@ -49,10 +50,14 @@ pub use seleniumbase_rs_plugin_fetcher as fetcher;
 pub use seleniumbase_rs_plugin_imap as imap;
 #[cfg(feature = "shield")]
 pub use seleniumbase_rs_plugin_shield as shield;
+#[cfg(feature = "tor")]
+pub use seleniumbase_rs_plugin_tor as tor;
 
 /// A registry of every built-in plugin whose feature is on, in the order
 /// `shield`, `block-resources`, `crx`, `fetcher`, `extractor`, `batcher`,
-/// `crawler`, `browser`, `imap`. Empty when no feature is on.
+/// `crawler`, `browser`, `imap`, `tor`. Empty when no feature is on. The order is
+/// the order the plugins were added here; it is not the order a set runs them
+/// in, which the plugins' categories and ordering declarations decide.
 #[must_use]
 pub fn registry() -> Registry {
     #[allow(unused_mut)]
@@ -92,6 +97,10 @@ pub fn registry() -> Registry {
     #[cfg(feature = "imap")]
     {
         registry = registry.with(Descriptor::of::<imap::Imap>());
+    }
+    #[cfg(feature = "tor")]
+    {
+        registry = registry.with(Descriptor::of::<tor::Tor>());
     }
     registry
 }
