@@ -13,6 +13,7 @@ members = [
     "plugins/fetcher",
     "plugins/imap",
     "plugins/shield",
+    "plugins/tor",
     "plugins/wasm",
 ]
 exclude = ["template"]
@@ -36,7 +37,10 @@ seleniumbase-rs-plugin-extractor = { path = "plugins/extractor", version = "0.1"
 seleniumbase-rs-plugin-fetcher = { path = "plugins/fetcher", version = "0.1" }
 seleniumbase-rs-plugin-imap = { path = "plugins/imap", version = "0.1" }
 seleniumbase-rs-plugin-shield = { path = "plugins/shield", version = "0.1" }
+seleniumbase-rs-plugin-tor = { path = "plugins/tor", version = "0.1" }
 async-trait = "0.1"
+ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+tokio = { version = "1", default-features = false, features = ["io-util", "net", "rt", "sync", "time"] }

@@ -1,0 +1,19 @@
+[package]
+name = "seleniumbase-rs-plugin-tor"
+description = "A seleniumbase-rs plugin that sends the browser's traffic through a local Tor daemon and keeps DNS lookups off the machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "tor", "privacy", "socks5"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ring.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true

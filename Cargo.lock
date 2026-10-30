@@ -727,6 +727,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs-plugin-tor"
+version = "0.1.3"
+dependencies = [
+ "ring",
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-testing",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "seleniumbase-rs-plugin-wasm"
 version = "0.1.3"
 dependencies = [
