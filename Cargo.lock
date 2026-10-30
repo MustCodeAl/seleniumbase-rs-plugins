@@ -752,6 +752,7 @@ dependencies = [
  "seleniumbase-rs-plugin-crx",
  "seleniumbase-rs-plugin-extractor",
  "seleniumbase-rs-plugin-fetcher",
+ "seleniumbase-rs-plugin-imap",
  "seleniumbase-rs-plugin-shield",
  "seleniumbase-rs-plugin-testing",
  "serde_json",

@@ -20,6 +20,7 @@ extractor = ["dep:seleniumbase-rs-plugin-extractor"]
 batcher = ["dep:seleniumbase-rs-plugin-batcher"]
 crawler = ["dep:seleniumbase-rs-plugin-crawler"]
 browser = ["dep:seleniumbase-rs-plugin-browser"]
+imap = ["dep:seleniumbase-rs-plugin-imap"]
 
 [dependencies]
 seleniumbase-rs-plugin.workspace = true
@@ -31,6 +32,7 @@ seleniumbase-rs-plugin-extractor = { workspace = true, optional = true }
 seleniumbase-rs-plugin-batcher = { workspace = true, optional = true }
 seleniumbase-rs-plugin-crawler = { workspace = true, optional = true }
 seleniumbase-rs-plugin-browser = { workspace = true, optional = true }
+seleniumbase-rs-plugin-imap = { workspace = true, optional = true }
 
 [dev-dependencies]
 seleniumbase-rs-plugin-testing.workspace = true
