@@ -9,6 +9,34 @@ uses [`async-imap`](https://crates.io/crates/async-imap) for the protocol and
 [`mail-parser`](https://crates.io/crates/mail-parser) for the messages; TLS is
 `tokio-rustls` with the Mozilla root certificates.
 
+## Turn it on
+
+```sh
+cargo add seleniumbase-rs-plugin-imap --git https://github.com/MustCodeAl/seleniumbase-rs-plugins
+```
+
+Or take it from the built-in registry: depend on
+`seleniumbase-rs-plugins-builtin` with the feature `imap`, which builds the
+plugin from its name and options (the variable named by `password_env` must be
+set when the set is built; the error names it):
+
+```rust
+use seleniumbase_rs_plugins_builtin::{registry, PluginSpec};
+use serde_json::json;
+
+let set = registry().plugin_set(&[PluginSpec::new("imap").options(json!({
+    "host": "imap.example.com",
+    "user": "me@example.com",
+    "password_env": "MAIL_APP_PASSWORD",
+}))])?;
+```
+
+The set runs the task `wait_for_email` on the pure CDP engine. A WebDriver host
+offers no tasks yet, so `PluginSet::check_with` refuses a set with this plugin
+there for `task`; on that engine call `Imap::wait_for_email(&query, &clock)`
+yourself (it needs a `Clock`, not a browser). seleniumbase-rs reads the same
+options from `[plugins.imap]` in a config file, shown below.
+
 ## Options
 
 | Option | Default | Meaning |
@@ -84,8 +112,10 @@ nothing arrives in time, the error says what was waited for.
   unread is returned again by the next wait: use a small `since_secs` to skip the
   earlier ones.
 - IMAPS with `LOGIN` only: no STARTTLS, no OAuth2, no IDLE (it polls).
-- The capability declared is `HostNet` for any address (the plugin API has no
-  per-host scope); the only host the plugin talks to is `host`.
+- The plugin is in the `Testing` category and declares `task` and `HostNet` for
+  any address (the plugin API has no per-host scope; the only host the plugin
+  talks to is `host`). It keeps no state: each wait opens its own connection and
+  logs out at the end. TLS and the certificate check cannot be turned off.
 
 ## Tests
 
