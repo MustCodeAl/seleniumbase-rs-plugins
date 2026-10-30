@@ -7,6 +7,43 @@ version; it stays 0.1.x until the next release.
 
 ### Added
 
+- `seleniumbase-rs-plugin-tor`: the `tor` plugin (category Privacy, a Chromium
+  browser the program starts, pure CDP engine). It sends the browser's traffic
+  through a local Tor daemon's SocksPort (`127.0.0.1:9050` unless `socks` says
+  otherwise). It never installs, starts or stops Tor and talks to loopback
+  addresses only: a `socks` or `control` address that is not loopback is a
+  configuration error. In `before_launch` it refuses a launch that already has a
+  proxy, checks that something answers as a SOCKS5 proxy (and, with `control`,
+  `control_auth` and `require_bootstrapped`, that Tor finished bootstrapping),
+  starts a local forwarder, points `LaunchSettings::proxy` at it, adds the
+  host-resolver rule `MAP * ^NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost`
+  (names go to Tor as names, so `.onion` services work), turns QUIC off, sets the
+  WebRTC policy `disable_non_proxied_udp` and the preference
+  `net.network_prediction_options = 2`, and seals the proxy, the proxy of new
+  contexts and the WebRTC policy. Chrome sends no SOCKS credentials (and goes
+  direct for a proxy URL that has a user name), so the forwarders supply them:
+  every forwarder gives Tor an isolation parameter of its own, and with
+  `isolation = "per-context"` (the default) every browser context gets a
+  forwarder of its own through `before_context`, which Tor's `IsolateSOCKSAuth`
+  puts on its own circuits; `isolation = "browser"` shares one. The optional
+  control port reads the bootstrap state only, with a `SAFECOOKIE` cookie file
+  or a password taken from an environment variable (never an option). There is
+  no new-identity call. The tests use a fake SocksPort and a fake control port;
+  nothing was run against a real Tor daemon (an `#[ignore]`d test needs one),
+  and what the design assumes of Chrome was checked with Chrome 156 against a
+  fake SOCKS5 listener only (see the plugin's README).
+- `seleniumbase-rs-plugins-builtin`: the `tor` feature and a registry entry for
+  it, last in `registry()` after `imap`, and the re-export
+  `seleniumbase_rs_plugins_builtin::tor`. The registry lists plugins in the order
+  they were added; a set runs them by category, so `tor` still runs after
+  `browser` in either insertion order. The registry tests list it with the
+  feature and not without, build it from default options and from
+  `isolation = "browser"`, refuse a `socks` address that is not loopback, an
+  unknown option, an unknown isolation and a control password option, build it
+  with a control port and a cookie file, and check the set on the CDP engine
+  with no Tor daemon (the SOCKS probe runs in `before_launch`, not in `check`).
+  Both strict sets of every built-in gain `tor`. They use no network.
+
 - `seleniumbase-rs-plugin-browser`: the `browser` plugin (category Extension,
   a Chromium browser the program starts). Its two options are Python
   SeleniumBase's `--extension-zip` and `--extension-dir`: `extension_zip`
