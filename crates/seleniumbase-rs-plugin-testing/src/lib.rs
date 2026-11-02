@@ -57,7 +57,6 @@ pub use timer::ManualTimer;
 /// One thing a plugin asked a fake handle to do.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-
 pub enum Call {
     /// A DevTools Protocol command with its parameters.
     Send(String, Value),
