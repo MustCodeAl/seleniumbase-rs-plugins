@@ -309,17 +309,76 @@ mod browser {
     }
 
     #[test]
-    fn the_options_that_are_not_built_yet_are_refused() {
-        // `wait_for_workers` and `session` wait for plugin API hooks, so the
-        // plugin refuses them instead of taking them and doing nothing.
-        for option in ["wait_for_workers", "session"] {
-            let Err(error) =
-                registry().build(&PluginSpec::new("browser").options(json!({ option: true })))
-            else {
-                panic!("`{option}` must be refused");
-            };
-            assert!(error.to_string().contains(option), "{error}");
+    fn the_worker_and_session_options_build_and_a_dependent_option_alone_is_refused() {
+        // They build: nothing starts, so no folder or browser is needed.
+        let registry = registry();
+        for options in [
+            json!({
+                "extension_dir": ["folder"],
+                "wait_for_workers": true,
+                "worker_timeout_secs": 20,
+            }),
+            json!({ "session": "login", "session_dir": "kept" }),
+        ] {
+            let spec = PluginSpec::new("browser").options(options.clone());
+            let plugin = registry
+                .build(&spec)
+                .unwrap_or_else(|error| panic!("{options} must build: {error}"));
+            assert_eq!(plugin.name(), "browser");
         }
+        // An option that depends on another is refused when it stands alone,
+        // in the plugin's own words and by name.
+        for (options, option) in [
+            (json!({ "wait_for_workers": true }), "wait_for_workers"),
+            (json!({ "worker_timeout_secs": 5 }), "worker_timeout_secs"),
+            (json!({ "save_on_close": true }), "save_on_close"),
+            (json!({ "session_dir": "kept" }), "session_dir"),
+            (json!({ "interactive": true }), "interactive"),
+            (json!({ "session": "../escape" }), "session"),
+        ] {
+            let Err(error) = registry.build(&PluginSpec::new("browser").options(options.clone()))
+            else {
+                panic!("{options} must be refused");
+            };
+            let text = error.to_string();
+            assert!(text.contains(&format!("`{option}`")), "{options}: {text}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_saving_session_passes_the_set_check_and_interactive_needs_a_window() {
+        use seleniumbase_rs_plugin::{BrowserFamily, Engine, LaunchContext, PluginError};
+
+        let context = |headless| LaunchContext {
+            engine: Engine::Cdp,
+            family: BrowserFamily::Chromium,
+            headless,
+            connecting: false,
+        };
+        let registry = registry();
+
+        let saving = PluginSpec::new("browser").options(json!({
+            "session": "login",
+            "session_dir": "kept",
+            "save_on_close": true,
+        }));
+        let set = registry.plugin_set(&[saving]).unwrap();
+        set.check(&context(true)).unwrap();
+
+        let interactive = PluginSpec::new("browser").options(json!({
+            "session": "login",
+            "session_dir": "kept",
+            "interactive": true,
+        }));
+        let set = registry.plugin_set(&[interactive]).unwrap();
+        set.check(&context(false)).unwrap();
+        assert_eq!(set.task_names(), ["browser"]);
+        let error = set.check(&context(true)).unwrap_err();
+        assert!(
+            matches!(error, PluginError::Requirement { .. }),
+            "{error:?}"
+        );
     }
 
     #[cfg(not(any(
