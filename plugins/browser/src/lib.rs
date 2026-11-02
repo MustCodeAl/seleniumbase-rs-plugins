@@ -77,6 +77,8 @@ const NAME: &str = "browser";
 #[derive(Debug)]
 pub struct BrowserSession {
     config: SessionConfig,
+    /// Where the saved session lives, when `session` is set.
+    store: Option<session::Store>,
     /// The folders this browser's archives were unpacked into.
     unpacked: Mutex<Vec<TempDir>>,
     /// The extensions this browser loads that have a service worker.
@@ -95,13 +97,15 @@ impl BrowserSession {
     /// holds a comma.
     pub fn new(config: SessionConfig) -> Result<Self> {
         config.check()?;
-        Ok(Self::checked(config))
+        let store = session::Store::from_config(&config)?;
+        Ok(Self::build(config, store))
     }
 
     /// A plugin for options that were already checked.
-    fn checked(config: SessionConfig) -> Self {
+    fn build(config: SessionConfig, store: Option<session::Store>) -> Self {
         Self {
             config,
+            store,
             unpacked: Mutex::new(Vec::new()),
             workers: Mutex::new(Vec::new()),
         }
@@ -144,7 +148,15 @@ impl Configurable for BrowserSession {
     const NAME: &'static str = NAME;
 
     fn describe() -> Metadata {
-        declared().capability(Capability::HostFsWrite(PathScope::Temp))
+        // What an instance may add, depending on its options: cookies for the
+        // session, the clock for waiting, a task and a tab for signing in.
+        declared()
+            .capability(Capability::HostFsWrite(PathScope::Temp))
+            .optional(Capability::CookiesRead)
+            .optional(Capability::CookiesWrite)
+            .optional(Capability::Clock)
+            .optional(Capability::Task)
+            .optional(Capability::PageNavigate)
     }
 
     /// Options: `extension_zip` and `extension_dir`, each a list of paths or a
@@ -177,9 +189,21 @@ impl Plugin for BrowserSession {
         if !self.config.extension_zip.is_empty() {
             meta = meta.capability(Capability::HostFsWrite(PathScope::Temp));
         }
-        let sources = self.config.sources();
-        if !sources.is_empty() {
-            meta = meta.capability(Capability::HostFsRead(PathScope::Declared(sources)));
+        // The paths it reads: the extensions, and the session file.
+        let mut reads = self.config.sources();
+        if let Some(store) = &self.store {
+            reads.push(store.file().to_path_buf());
+            meta = meta.capability(Capability::CookiesWrite);
+            if self.config.saves() {
+                meta =
+                    meta.capability(Capability::CookiesRead)
+                        .capability(Capability::HostFsWrite(PathScope::Declared(vec![
+                            store.dir().to_path_buf(),
+                        ])));
+            }
+        }
+        if !reads.is_empty() {
+            meta = meta.capability(Capability::HostFsRead(PathScope::Declared(reads)));
         }
         if self.config.wait_for_workers {
             meta = meta
@@ -192,7 +216,10 @@ impl Plugin for BrowserSession {
     /// A fresh instance for each browser, so closing one pooled browser does
     /// not delete the unpacked folders of the others.
     fn per_launch(&self) -> Option<Arc<dyn Plugin>> {
-        Some(Arc::new(Self::checked(self.config.clone())))
+        Some(Arc::new(Self::build(
+            self.config.clone(),
+            self.store.clone(),
+        )))
     }
 
     async fn before_launch(&self, launch: &mut LaunchSettings) -> Result<()> {
@@ -222,6 +249,23 @@ impl Plugin for BrowserSession {
                 self.config.worker_timeout_secs_or_default(),
             )
             .await?;
+        }
+        if let Some(store) = &self.store {
+            session::restore(browser, store).await?;
+            if self.config.saves() {
+                store.check_writable()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Saves the session when `save_on_close` is on. The browser still
+    /// answers commands here.
+    async fn before_close(&self, browser: &dyn BrowserHandle) -> Result<()> {
+        if self.config.save_on_close
+            && let Some(store) = &self.store
+        {
+            session::save(browser, store).await?;
         }
         Ok(())
     }

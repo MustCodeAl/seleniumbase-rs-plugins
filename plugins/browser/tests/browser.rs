@@ -10,7 +10,7 @@ use seleniumbase_rs_plugin::{
     LaunchSettings, Metadata, PathScope, Plugin, PluginError, PluginSet, PluginSpec, Registry,
     Requirements, async_trait,
 };
-use seleniumbase_rs_plugin::{CapabilitySet, ExtensionWorker, LoadedExtension};
+use seleniumbase_rs_plugin::{BrowserHandle, CapabilitySet, ExtensionWorker, LoadedExtension};
 use seleniumbase_rs_plugin_browser::{BrowserSession, SessionConfig};
 use seleniumbase_rs_plugin_crx::CrxExtensions;
 use seleniumbase_rs_plugin_testing::block_on;
@@ -1369,6 +1369,629 @@ fn a_set_that_withholds_the_clock_refuses_the_wait_at_start_up() {
         "{error:?}"
     );
 }
+
+// ---- saved sessions (cookies in a file) ----
+
+// Saving needs Unix file permissions (the plugin refuses it elsewhere), and
+// these tests use symbolic links and modes.
+#[cfg(unix)]
+mod sessions {
+    use super::*;
+
+    /// A value no error, result, log line or `Debug` output may ever repeat.
+    const CANARY: &str = "canary-8f3a2c19-secret";
+
+    /// A browser whose errors repeat the parameters of the command, as a careless
+    /// one might.
+    struct Leaky;
+
+    #[async_trait]
+    impl BrowserHandle for Leaky {
+        fn engine(&self) -> Engine {
+            Engine::Cdp
+        }
+
+        fn family(&self) -> BrowserFamily {
+            BrowserFamily::Chromium
+        }
+
+        async fn send(&self, method: &str, params: Value) -> seleniumbase_rs_plugin::Result<Value> {
+            Err(PluginError::other(format!("{method} failed for {params}")))
+        }
+    }
+
+    /// `Storage.getCookies` answers, as Chrome words them: extra fields, and
+    /// `expires: -1` for a session cookie.
+    fn chrome_cookies() -> Value {
+        json!({ "cookies": [
+        { "name": "sid", "value": CANARY, "domain": ".example.test", "path": "/",
+          "expires": 4_102_444_800.0, "size": 30, "httpOnly": true, "secure": true,
+          "session": false, "sameSite": "Lax", "priority": "High", "sameParty": false,
+          "sourceScheme": "Secure", "sourcePort": 443 },
+        { "name": "visit", "value": "1", "domain": "example.test", "path": "/app",
+          "expires": -1, "size": 6, "httpOnly": false, "secure": false, "session": true,
+          "priority": "Medium", "sameParty": false, "sourceScheme": "NonSecure",
+          "sourcePort": 80 },
+        { "name": "part", "value": "p", "domain": ".example.test", "path": "/",
+          "expires": -1, "size": 5, "httpOnly": false, "secure": true, "session": true,
+          "sameSite": "None",
+          "partitionKey": { "topLevelSite": "https://top.test", "hasCrossSiteAncestor": false } },
+    ] })
+    }
+
+    /// What the three cookies of [`chrome_cookies`] become in a session file and
+    /// in `Storage.setCookies`: only the fields the plugin keeps, and no expiry
+    /// for a session cookie.
+    fn kept_cookies() -> Value {
+        json!([
+            { "name": "sid", "value": CANARY, "domain": ".example.test", "path": "/",
+              "expires": 4_102_444_800.0, "httpOnly": true, "secure": true, "sameSite": "Lax",
+              "priority": "High", "sourceScheme": "Secure", "sourcePort": 443 },
+            { "name": "visit", "value": "1", "domain": "example.test", "path": "/app",
+              "httpOnly": false, "secure": false, "priority": "Medium",
+              "sourceScheme": "NonSecure", "sourcePort": 80 },
+            { "name": "part", "value": "p", "domain": ".example.test", "path": "/",
+              "httpOnly": false, "secure": true, "sameSite": "None",
+              "partitionKey": { "topLevelSite": "https://top.test", "hasCrossSiteAncestor": false } },
+        ])
+    }
+
+    /// A session file's text with these cookies.
+    fn session_text(cookies: &Value) -> String {
+        json!({ "version": 1, "saved_at_ms": 1_767_225_600_000_u64, "cookies": cookies })
+            .to_string()
+    }
+
+    /// A set around a plugin that restores the session `login` kept in `dir`,
+    /// and saves it when the browser closes if `save` is true.
+    fn session_set(dir: &Path, save: bool) -> PluginSet {
+        let config = SessionConfig::new()
+            .with_session("login")
+            .with_session_dir(dir)
+            .with_save_on_close(save);
+        let set = PluginSet::strict()
+            .with(plugin(config))
+            .expect("a strict set takes it");
+        set.check(&context(true))
+            .expect("the grants cover the options");
+        set
+    }
+
+    /// The text of the failure of the `browser` plugin in `hook`, which must not
+    /// repeat the canary.
+    fn session_failure(error: &PluginError, hook: &str) -> String {
+        let PluginError::Hook {
+            plugin,
+            hook: found,
+            message,
+        } = error
+        else {
+            panic!("expected a hook failure, got {error:?}");
+        };
+        assert_eq!(plugin, "browser");
+        assert_eq!(*found, hook);
+        assert!(!message.contains(CANARY), "a value leaked: {message}");
+        assert!(!format!("{error:?}").contains(CANARY), "a value leaked");
+        message.clone()
+    }
+
+    fn put_session(dir: &Path, text: &str) {
+        std::fs::create_dir_all(dir).expect("make the session folder");
+        std::fs::write(dir.join("login.json"), text).expect("write the session file");
+    }
+
+    fn sent_cookies(browser: &RecordingBrowser) -> Vec<Value> {
+        browser
+            .calls()
+            .into_iter()
+            .filter_map(|call| match call {
+                Call::Send(method, params) if method == "Storage.setCookies" => {
+                    Some(params["cookies"].clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn restore_puts_back_only_the_allowed_fields_of_each_cookie() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let mut cookies = chrome_cookies()["cookies"].clone();
+        // The file may hold more than the plugin sends: fields the browser added,
+        // and ones somebody else did.
+        cookies[0]["evil"] = json!("<script>");
+        cookies[1]["session"] = json!(true);
+        put_session(&dir, &session_text(&cookies));
+        let set = session_set(&dir, false);
+        let browser = RecordingBrowser::new();
+
+        block_on(set.on_browser(&browser)).expect("a good session file");
+
+        assert_eq!(sent_cookies(&browser), [kept_cookies()]);
+        assert_eq!(
+            browser.calls().len(),
+            1,
+            "one command: {:?}",
+            browser.calls()
+        );
+    }
+
+    #[test]
+    fn expired_cookies_are_dropped_and_session_cookies_are_kept() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let cookie = |name: &str, expires: Option<f64>| {
+            let mut cookie = json!({ "name": name, "value": "v", "domain": "a.test", "path": "/" });
+            if let Some(expires) = expires {
+                cookie["expires"] = json!(expires);
+            }
+            cookie
+        };
+        put_session(
+            &dir,
+            &session_text(&json!([
+                cookie("expired", Some(1.0)),
+                cookie("later", Some(4_102_444_800.0)),
+                cookie("session", None),
+                cookie("minus-one", Some(-1.0)),
+            ])),
+        );
+        let browser = RecordingBrowser::new();
+
+        block_on(session_set(&dir, false).on_browser(&browser)).expect("a good session file");
+
+        let sent = sent_cookies(&browser);
+        let names: Vec<&str> = sent[0]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|c| c["name"].as_str().expect("a name"))
+            .collect();
+        assert_eq!(names, ["later", "session", "minus-one"]);
+        assert_eq!(sent[0][0]["expires"], json!(4_102_444_800.0));
+        assert!(sent[0][1].get("expires").is_none());
+        assert!(
+            sent[0][2].get("expires").is_none(),
+            "-1 is a session cookie"
+        );
+    }
+
+    #[test]
+    fn a_session_that_was_never_saved_is_a_fresh_start() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("not-made-yet");
+        let browser = RecordingBrowser::new();
+        block_on(session_set(&dir, false).on_browser(&browser)).expect("a missing file is fine");
+        assert!(browser.calls().is_empty());
+        assert!(!dir.exists(), "restoring makes nothing");
+    }
+
+    #[test]
+    fn a_session_with_nothing_to_restore_sends_nothing() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        for cookies in [
+            json!([]),
+            json!([{ "name": "old", "value": "v", "domain": "a.test", "path": "/", "expires": 1.0 }]),
+        ] {
+            put_session(&dir, &session_text(&cookies));
+            let browser = RecordingBrowser::new();
+            block_on(session_set(&dir, false).on_browser(&browser)).expect("nothing to put back");
+            assert!(browser.calls().is_empty(), "{cookies}");
+        }
+    }
+
+    #[test]
+    fn a_bad_session_file_is_an_error_naming_the_option_and_never_a_value() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let cookie = |field: &str, value: Value| {
+            let mut cookie =
+                json!({ "name": "sid", "value": "v", "domain": "a.test", "path": "/" });
+            cookie[field] = value;
+            session_text(&json!([cookie]))
+        };
+        let texts = [
+            // Cut off in the middle of a value: serde would quote the value.
+            format!(r#"{{"version":1,"saved_at_ms":1,"cookies":[{{"name":"sid","value":"{CANARY}"#),
+            cookie("value", json!([CANARY])),
+            cookie("name", json!({ "x": CANARY })),
+            cookie("domain", json!(5)),
+            cookie("path", json!(CANARY)),
+            cookie("sameSite", json!(CANARY)),
+            cookie("priority", json!(CANARY)),
+            cookie("sourceScheme", json!(CANARY)),
+            cookie("sourcePort", json!(CANARY)),
+            cookie("httpOnly", json!(CANARY)),
+            cookie("secure", json!(CANARY)),
+            cookie("expires", json!(CANARY)),
+            cookie("partitionKey", json!(7)),
+            format!(r#"{{"version":2,"saved_at_ms":1,"cookies":["{CANARY}"]}}"#),
+            format!(r#"{{"version":"{CANARY}","cookies":[]}}"#),
+            format!(r#"{{"version":1,"cookies":"{CANARY}"}}"#),
+            format!(r#"{{"version":1,"cookies":["{CANARY}"]}}"#),
+            format!(r#"{{"version":1}} "{CANARY}""#),
+            format!(r#"["{CANARY}"]"#),
+            format!(r#""{CANARY}""#),
+            String::new(),
+        ];
+        for text in texts {
+            put_session(&dir, &text);
+            let browser = RecordingBrowser::new();
+            let error = block_on(session_set(&dir, false).on_browser(&browser))
+                .expect_err("a bad file must be refused");
+            let message = session_failure(&error, "on_browser");
+            assert!(message.contains("`session`"), "{message}");
+            assert!(message.contains("login"), "{message}");
+            assert!(browser.calls().is_empty(), "nothing was sent for {text}");
+        }
+    }
+
+    #[test]
+    fn a_syntax_error_says_where_and_not_what() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        put_session(
+            &dir,
+            &format!("{{\n  \"version\": 1,\n  \"cookies\": [\"{CANARY}\" 5]\n}}"),
+        );
+        let error = block_on(session_set(&dir, false).on_browser(&RecordingBrowser::new()))
+            .expect_err("not JSON");
+        let message = session_failure(&error, "on_browser");
+        assert!(message.contains("line 3"), "{message}");
+    }
+
+    #[test]
+    fn a_session_file_that_is_too_big_or_too_full_is_refused() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        std::fs::create_dir_all(&dir).expect("make the folder");
+
+        std::fs::write(dir.join("login.json"), vec![b' '; 8 * 1024 * 1024 + 1]).expect("write");
+        let error = block_on(session_set(&dir, false).on_browser(&RecordingBrowser::new()))
+            .expect_err("too big");
+        assert!(session_failure(&error, "on_browser").contains("8 MiB"));
+
+        let cookie = json!({ "name": "c", "value": "v", "domain": "a.test", "path": "/" });
+        put_session(&dir, &session_text(&json!(vec![cookie.clone(); 5001])));
+        let error = block_on(session_set(&dir, false).on_browser(&RecordingBrowser::new()))
+            .expect_err("too many");
+        assert!(session_failure(&error, "on_browser").contains("5000"));
+
+        put_session(&dir, &session_text(&json!(vec![cookie; 5000])));
+        let browser = RecordingBrowser::new();
+        block_on(session_set(&dir, false).on_browser(&browser)).expect("5000 is the limit");
+        assert_eq!(
+            sent_cookies(&browser)[0].as_array().expect("a list").len(),
+            5000
+        );
+    }
+
+    #[test]
+    fn a_symlink_or_a_folder_in_place_of_the_session_file_is_refused_on_restore() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        std::fs::create_dir_all(&dir).expect("make the folder");
+        let elsewhere = fixtures.path().join("elsewhere.json");
+        std::fs::write(&elsewhere, session_text(&json!([]))).expect("write");
+        std::os::unix::fs::symlink(&elsewhere, dir.join("login.json")).expect("a symlink");
+        let error = block_on(session_set(&dir, false).on_browser(&RecordingBrowser::new()))
+            .expect_err("a symlink");
+        assert!(session_failure(&error, "on_browser").contains("symbolic link"));
+
+        std::fs::remove_file(dir.join("login.json")).expect("remove");
+        std::fs::create_dir(dir.join("login.json")).expect("a folder");
+        let error = block_on(session_set(&dir, false).on_browser(&RecordingBrowser::new()))
+            .expect_err("a folder");
+        assert!(session_failure(&error, "on_browser").contains("not a regular file"));
+    }
+
+    #[test]
+    fn save_on_close_writes_the_cookies_in_before_close() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("made").join("sessions");
+        let set = session_set(&dir, true);
+        let browser = RecordingBrowser::new().replying("Storage.getCookies", chrome_cookies());
+
+        block_on(set.on_browser(&browser)).expect("nothing to restore, the folder can be written");
+        let failures = block_on(set.before_close(&browser));
+
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(
+            browser.calls(),
+            [Call::Send("Storage.getCookies".into(), json!({}))]
+        );
+        let file = dir.join("login.json");
+        let saved: Value =
+            serde_json::from_slice(&std::fs::read(&file).expect("the file")).expect("JSON");
+        assert_eq!(saved["version"], json!(1));
+        assert!(saved["saved_at_ms"].as_u64().expect("a time") > 1_767_225_600_000);
+        assert_eq!(saved["cookies"], kept_cookies());
+        let mode = |path: &Path| {
+            std::fs::metadata(path)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(dir.parent().expect("parent")), 0o700);
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .expect("read")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, ["login.json"], "no temporary file is left");
+    }
+
+    #[test]
+    fn saving_replaces_a_looser_file_and_leaves_no_temporary_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        put_session(&dir, "old content");
+        let file = dir.join("login.json");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("loosen");
+        let set = session_set(&dir, true);
+        let browser = RecordingBrowser::new().replying("Storage.getCookies", chrome_cookies());
+
+        assert!(block_on(set.before_close(&browser)).is_empty());
+
+        let text = std::fs::read_to_string(&file).expect("the file");
+        assert!(text.contains("\"version\""), "{text}");
+        assert_eq!(
+            std::fs::metadata(&file)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(std::fs::read_dir(&dir).expect("read").count(), 1);
+    }
+
+    #[test]
+    fn a_symlink_at_the_target_is_not_followed_when_saving() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        std::fs::create_dir_all(&dir).expect("make the folder");
+        let victim = fixtures.path().join("victim.txt");
+        std::fs::write(&victim, "untouched").expect("write");
+        std::os::unix::fs::symlink(&victim, dir.join("login.json")).expect("a symlink");
+        let set = session_set(&dir, true);
+        let browser = RecordingBrowser::new().replying("Storage.getCookies", chrome_cookies());
+
+        let failures = block_on(set.before_close(&browser));
+
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        let message = session_failure(&failures[0], "before_close");
+        assert!(message.contains("symbolic link"), "{message}");
+        assert_eq!(std::fs::read_to_string(&victim).expect("read"), "untouched");
+        assert_eq!(
+            std::fs::read_dir(&dir).expect("read").count(),
+            1,
+            "no temporary file"
+        );
+    }
+
+    #[test]
+    fn a_save_that_fails_leaves_the_old_file_and_no_temporary_file() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        put_session(&dir, "the old session");
+        let set = session_set(&dir, true);
+
+        // The browser cannot give its cookies.
+        let broken = RecordingBrowser::new().failing("Storage.getCookies");
+        let failures = block_on(set.before_close(&broken));
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        session_failure(&failures[0], "before_close");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("login.json")).expect("read"),
+            "the old session"
+        );
+
+        // The browser answers something that is not a list of cookies.
+        for reply in [
+            json!({}),
+            json!({ "cookies": "x" }),
+            json!({ "cookies": [5] }),
+            json!(null),
+        ] {
+            let odd = RecordingBrowser::new().replying("Storage.getCookies", reply);
+            let failures = block_on(set.before_close(&odd));
+            assert_eq!(failures.len(), 1, "{failures:?}");
+            session_failure(&failures[0], "before_close");
+        }
+        assert_eq!(
+            std::fs::read_to_string(dir.join("login.json")).expect("read"),
+            "the old session"
+        );
+
+        // Too many cookies to restore later: not saved.
+        let cookie = json!({ "name": "c", "value": "v", "domain": "a.test", "path": "/" });
+        let many = RecordingBrowser::new().replying(
+            "Storage.getCookies",
+            json!({ "cookies": vec![cookie; 5001] }),
+        );
+        let failures = block_on(set.before_close(&many));
+        assert!(session_failure(&failures[0], "before_close").contains("5000"));
+
+        // A folder where the file should go.
+        std::fs::remove_file(dir.join("login.json")).expect("remove");
+        std::fs::create_dir(dir.join("login.json")).expect("a folder");
+        let browser = RecordingBrowser::new().replying("Storage.getCookies", chrome_cookies());
+        let failures = block_on(set.before_close(&browser));
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(session_failure(&failures[0], "before_close").contains("not a regular file"));
+        assert_eq!(
+            std::fs::read_dir(&dir).expect("read").count(),
+            1,
+            "no temporary file"
+        );
+    }
+
+    #[test]
+    fn without_save_on_close_before_close_does_nothing() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let set = session_set(&dir, false);
+        let browser = RecordingBrowser::new().replying("Storage.getCookies", chrome_cookies());
+        assert!(block_on(set.before_close(&browser)).is_empty());
+        assert!(browser.calls().is_empty());
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_saved_session_comes_back_in_the_next_browser() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let first = session_set(&dir, true);
+        let browser = RecordingBrowser::new().replying("Storage.getCookies", chrome_cookies());
+        assert!(block_on(first.before_close(&browser)).is_empty());
+
+        // A pool hands the next browser a fresh copy of the same plugin.
+        let next = first.for_launch();
+        let again = RecordingBrowser::new();
+        block_on(next.on_browser(&again)).expect("the session is put back");
+        assert_eq!(sent_cookies(&again), [kept_cookies()]);
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_written_fails_the_launch_and_not_the_close() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let locked = fixtures.path().join("locked");
+        std::fs::create_dir(&locked).expect("make the folder");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500)).expect("lock");
+        let dir = locked.join("sessions");
+        // A process that may write there anyway (root) cannot show the failure.
+        if std::fs::create_dir(&dir).is_ok() {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
+                .expect("unlock");
+            return;
+        }
+        let set = session_set(&dir, true);
+        let error = block_on(set.on_browser(&RecordingBrowser::new())).expect_err("not writable");
+        let message = session_failure(&error, "on_browser");
+        assert!(message.contains("`session`"), "{message}");
+        assert!(message.contains("save_on_close"), "{message}");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).expect("unlock");
+    }
+
+    #[test]
+    fn a_browser_message_that_repeats_a_cookie_is_scrubbed() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        put_session(&dir, &session_text(&chrome_cookies()["cookies"]));
+        let set = session_set(&dir, true);
+        let error = block_on(set.on_browser(&Leaky)).expect_err("the browser refuses");
+        let message = session_failure(&error, "on_browser");
+        assert!(message.contains("Storage.setCookies"), "{message}");
+
+        let failures = block_on(set.before_close(&Leaky));
+        session_failure(&failures[0], "before_close");
+    }
+
+    #[test]
+    fn the_instance_declares_the_capabilities_its_session_options_need() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let file = dir.join("login.json");
+        let has = |meta: &Metadata, capability: &Capability| meta.capabilities.covers(capability);
+        let reads_file = Capability::HostFsRead(PathScope::Declared(vec![file.clone()]));
+        let writes_dir = Capability::HostFsWrite(PathScope::Declared(vec![dir.clone()]));
+
+        let none = plugin(SessionConfig::new()).metadata();
+        for capability in [
+            &Capability::CookiesRead,
+            &Capability::CookiesWrite,
+            &reads_file,
+            &writes_dir,
+        ] {
+            assert!(!has(&none, capability), "{capability}");
+        }
+
+        let restore = plugin(
+            SessionConfig::new()
+                .with_session("login")
+                .with_session_dir(&dir),
+        )
+        .metadata();
+        assert!(has(&restore, &Capability::CookiesWrite));
+        assert!(has(&restore, &reads_file));
+        assert!(!has(&restore, &Capability::CookiesRead));
+        assert!(!has(&restore, &writes_dir));
+
+        let saving = plugin(
+            SessionConfig::new()
+                .with_session("login")
+                .with_session_dir(&dir)
+                .with_save_on_close(true),
+        )
+        .metadata();
+        assert!(has(&saving, &Capability::CookiesWrite));
+        assert!(has(&saving, &Capability::CookiesRead));
+        assert!(has(&saving, &reads_file));
+        assert!(has(&saving, &writes_dir));
+    }
+
+    #[test]
+    fn a_set_that_withholds_cookie_access_refuses_the_session_at_start_up() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        for (missing, expected) in [
+            (Capability::CookiesWrite, "cookies.write"),
+            (Capability::CookiesRead, "cookies.read"),
+        ] {
+            let saving = plugin(
+                SessionConfig::new()
+                    .with_session("login")
+                    .with_session_dir(&dir)
+                    .with_save_on_close(true),
+            );
+            let grants: CapabilitySet = saving
+                .metadata()
+                .capabilities
+                .iter()
+                .filter(|capability| **capability != missing)
+                .cloned()
+                .collect();
+            let set = PluginSet::strict()
+                .with_grants(saving, grants)
+                .expect("a strict set takes it");
+            let error = set.check(&context(true)).expect_err("not granted");
+            assert!(
+                matches!(&error, PluginError::Capability { capability, .. } if capability == expected),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_session_folder_defaults_to_saved_sessions_in_the_working_directory() {
+        let here = std::env::current_dir().expect("a working directory");
+        let meta = plugin(SessionConfig::new().with_session("login")).metadata();
+        let expected = Capability::HostFsRead(PathScope::Declared(vec![
+            here.join("saved_sessions").join("login.json"),
+        ]));
+        assert!(meta.capabilities.covers(&expected), "{meta:?}");
+
+        // A relative folder is made absolute when the plugin is built.
+        let meta = plugin(
+            SessionConfig::new()
+                .with_session("login")
+                .with_session_dir("kept"),
+        )
+        .metadata();
+        let expected = Capability::HostFsRead(PathScope::Declared(vec![
+            here.join("kept").join("login.json"),
+        ]));
+        assert!(meta.capabilities.covers(&expected), "{meta:?}");
+    }
+} // mod sessions
 
 // ---- order against a privacy plugin such as tor (spec 8, question 11) ----
 
