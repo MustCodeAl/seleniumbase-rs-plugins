@@ -171,13 +171,14 @@ fn the_builder_adds_in_order() {
 
 #[test]
 fn an_unknown_option_is_refused_by_name() {
-    // `session`, `wait_for_workers` and `interactive` are in the design but not
-    // built yet: they are refused instead of accepted and ignored.
+    // Misspellings of the real options, and one that never existed.
     for option in [
         "extension_zips",
-        "session",
-        "wait_for_workers",
-        "interactive",
+        "wait_for_worker",
+        "worker_timeout",
+        "sessions",
+        "save_on_exit",
+        "interactiv",
     ] {
         let mut options = Map::new();
         options.insert(option.to_owned(), json!(true));
@@ -235,6 +236,233 @@ fn a_comma_in_a_folder_is_refused_because_chrome_splits_its_list_there() {
     assert!(error.to_string().contains("my,extension"), "{error}");
     assert!(error.to_string().contains("comma"), "{error}");
 }
+
+// ---- the options for workers, saved sessions and signing in ----
+
+/// The text of the refusal `options` get: a `Config` error that starts the way
+/// every option error of the plugin does.
+fn refused(options: &Value) -> String {
+    let error = match BrowserSession::configure(options) {
+        Ok(_) => panic!("{options} must be refused"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(error, PluginError::Config(_)),
+        "{options}: {error:?}"
+    );
+    let text = error.to_string();
+    assert!(
+        text.starts_with("plugin configuration: browser:"),
+        "{options}: {text}"
+    );
+    text
+}
+
+#[test]
+fn the_new_options_are_off_by_default() {
+    let plugin = BrowserSession::configure(&Value::Null).expect("no options");
+    let config = plugin.config();
+    assert!(!config.wait_for_workers);
+    assert_eq!(config.worker_timeout_secs, None);
+    assert_eq!(config.session, None);
+    assert!(!config.save_on_close);
+    assert_eq!(config.session_dir, None);
+    assert!(!config.interactive);
+    assert_eq!(config.pause_message, None);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_new_options_are_read_and_the_builder_sets_the_same_fields() {
+    let plugin = BrowserSession::configure(&json!({
+        "extension_dir": ["ext"],
+        "wait_for_workers": true,
+        "worker_timeout_secs": 20,
+        "session": "login",
+        "save_on_close": true,
+        "session_dir": "kept",
+        "interactive": true,
+        "pause_message": "Sign in now",
+    }))
+    .expect("valid options");
+    let built = SessionConfig::new()
+        .with_dir("ext")
+        .with_wait_for_workers(true)
+        .with_worker_timeout_secs(20)
+        .with_session("login")
+        .with_save_on_close(true)
+        .with_session_dir("kept")
+        .with_interactive(true)
+        .with_pause_message("Sign in now");
+    assert_eq!(plugin.config(), &built);
+    assert_eq!(built.worker_timeout_secs, Some(20));
+    assert_eq!(built.session.as_deref(), Some("login"));
+    assert_eq!(built.session_dir, Some(PathBuf::from("kept")));
+    assert_eq!(built.pause_message.as_deref(), Some("Sign in now"));
+}
+
+#[test]
+fn wait_for_workers_needs_an_extension_to_wait_for() {
+    let text = refused(&json!({ "wait_for_workers": true }));
+    assert!(text.contains("`wait_for_workers`"), "{text}");
+    assert!(
+        text.contains("extension_zip") && text.contains("extension_dir"),
+        "{text}"
+    );
+    BrowserSession::configure(&json!({ "wait_for_workers": true, "extension_dir": ["ext"] }))
+        .expect("an extension to wait for");
+    BrowserSession::configure(&json!({ "wait_for_workers": true, "extension_zip": "a.zip" }))
+        .expect("an archive to wait for");
+    BrowserSession::configure(&json!({ "wait_for_workers": false })).expect("off needs nothing");
+}
+
+#[test]
+fn worker_timeout_secs_needs_wait_for_workers_and_a_range() {
+    for options in [
+        json!({ "extension_dir": ["ext"], "worker_timeout_secs": 5 }),
+        json!({ "extension_dir": ["ext"], "wait_for_workers": false, "worker_timeout_secs": 5 }),
+    ] {
+        let text = refused(&options);
+        assert!(
+            text.contains("`worker_timeout_secs`") && text.contains("`wait_for_workers`"),
+            "the message names both options: {text}"
+        );
+    }
+    for seconds in [0u64, 31, 3600] {
+        let text = refused(&json!({
+            "extension_dir": ["ext"],
+            "wait_for_workers": true,
+            "worker_timeout_secs": seconds,
+        }));
+        assert!(text.contains("`worker_timeout_secs`"), "{text}");
+        assert!(text.contains("between 1 and 30"), "{text}");
+    }
+    for seconds in [1u64, 10, 30] {
+        let plugin = BrowserSession::configure(&json!({
+            "extension_dir": ["ext"],
+            "wait_for_workers": true,
+            "worker_timeout_secs": seconds,
+        }))
+        .expect("in range");
+        assert_eq!(plugin.config().worker_timeout_secs, Some(seconds));
+    }
+}
+
+#[test]
+fn a_wrong_type_for_one_of_the_new_options_is_refused() {
+    for options in [
+        json!({ "wait_for_workers": "yes" }),
+        json!({ "worker_timeout_secs": -1 }),
+        json!({ "worker_timeout_secs": "ten" }),
+        json!({ "worker_timeout_secs": 1.5 }),
+        json!({ "session": 5 }),
+        json!({ "session": true }),
+        json!({ "save_on_close": 1 }),
+        json!({ "session_dir": 7 }),
+        json!({ "interactive": "yes" }),
+        json!({ "pause_message": 3 }),
+    ] {
+        refused(&options);
+    }
+}
+
+#[test]
+fn a_session_name_is_one_safe_path_component() {
+    let too_long = "x".repeat(65);
+    for name in [
+        "../x",
+        "a/b",
+        "a\\b",
+        ".hidden",
+        "",
+        "..",
+        "a b",
+        "tab\there",
+        "nul\0byte",
+        "é",
+        "-dash",
+        "_under",
+        "/abs",
+        too_long.as_str(),
+    ] {
+        let text = refused(&json!({ "session": name }));
+        assert!(text.contains("`session`"), "{name:?}: {text}");
+    }
+    let longest = "x".repeat(64);
+    for name in ["a", "login-1", "A.b_c", "0", "a..b", longest.as_str()] {
+        BrowserSession::configure(&json!({ "session": name }))
+            .unwrap_or_else(|error| panic!("{name:?} is a good name: {error}"));
+    }
+}
+
+#[test]
+fn the_options_that_belong_to_a_session_need_one() {
+    for (options, option) in [
+        (json!({ "save_on_close": true }), "save_on_close"),
+        (json!({ "session_dir": "kept" }), "session_dir"),
+        (json!({ "interactive": true }), "interactive"),
+    ] {
+        let text = refused(&options);
+        assert!(
+            text.contains(&format!("`{option}`")) && text.contains("`session`"),
+            "the message names both options: {text}"
+        );
+    }
+    // Off needs nothing.
+    BrowserSession::configure(&json!({ "save_on_close": false, "interactive": false }))
+        .expect("off");
+}
+
+#[test]
+fn an_empty_session_dir_is_refused() {
+    for dir in ["", "   "] {
+        let text = refused(&json!({ "session": "s", "session_dir": dir }));
+        assert!(text.contains("`session_dir`"), "{text}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn pause_message_needs_interactive_and_must_be_plain_text() {
+    let text = refused(&json!({ "session": "s", "pause_message": "hello" }));
+    assert!(
+        text.contains("`pause_message`") && text.contains("`interactive`"),
+        "{text}"
+    );
+    let long = "m".repeat(501);
+    for message in ["", "   ", "bell\u{7}", "esc\u{1b}[2J", long.as_str()] {
+        let text = refused(&json!({
+            "session": "s",
+            "interactive": true,
+            "pause_message": message,
+        }));
+        assert!(text.contains("`pause_message`"), "{message:?}: {text}");
+    }
+    let fine = "m".repeat(500);
+    for message in ["Sign in, then press Enter", "two\nlines", fine.as_str()] {
+        BrowserSession::configure(&json!({
+            "session": "s",
+            "interactive": true,
+            "pause_message": message,
+        }))
+        .unwrap_or_else(|error| panic!("{message:?} is a good message: {error}"));
+    }
+}
+
+#[cfg(not(unix))]
+#[test]
+fn saving_a_session_is_refused_without_unix_file_permissions() {
+    for options in [
+        json!({ "session": "s", "save_on_close": true }),
+        json!({ "session": "s", "interactive": true }),
+    ] {
+        let text = refused(&options);
+        assert!(text.contains("Unix file permissions"), "{text}");
+    }
+    // Putting a session back needs no permissions to set.
+    BrowserSession::configure(&json!({ "session": "s" })).expect("restoring works anywhere");
+}
+
 
 // ---- unpacking and the launch settings ----
 

@@ -53,6 +53,8 @@
 //! options instead of being accepted and ignored.
 
 mod config;
+mod session;
+
 mod source;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
