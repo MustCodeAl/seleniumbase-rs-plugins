@@ -22,6 +22,15 @@ const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
 /// A `manifest.json` larger than this is not a manifest.
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
+/// An extension this instance loads whose manifest names a service worker.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Worker {
+    /// The folder Chrome loads, as `prepare` returns it (a real path).
+    pub(crate) folder: PathBuf,
+    /// The path the user wrote for it, for messages.
+    pub(crate) label: PathBuf,
+}
+
 /// What a launch needs from the configured paths.
 #[derive(Debug, Default)]
 pub(crate) struct Prepared {
@@ -30,6 +39,8 @@ pub(crate) struct Prepared {
     /// The temporary folders the archives were unpacked into. Dropping them
     /// deletes the folders.
     pub(crate) temps: Vec<TempDir>,
+    /// The extensions among `folders` that have a service worker.
+    pub(crate) workers: Vec<Worker>,
 }
 
 /// The error for the path `given` of the option `option`.
@@ -84,9 +95,16 @@ pub(crate) fn prepare(config: &SessionConfig, temp_root: &Path) -> Result<Prepar
             .tempdir_in(temp_root)
             .map_err(|error| problem(option, given, format!("cannot be unpacked: {error}")))?;
         unpack_archive(&bytes, temp.path()).map_err(|what| problem(option, given, what))?;
-        check_manifest(temp.path()).map_err(|what| problem(option, given, what))?;
+        let has_worker =
+            check_manifest(temp.path()).map_err(|what| problem(option, given, what))?;
         let folder = fs::canonicalize(temp.path())
             .map_err(|error| problem(option, given, format!("cannot be unpacked: {error}")))?;
+        if has_worker {
+            prepared.workers.push(Worker {
+                folder: folder.clone(),
+                label: given.clone(),
+            });
+        }
         prepared.folders.push(folder);
         prepared.temps.push(temp);
     }
@@ -106,7 +124,13 @@ pub(crate) fn prepare(config: &SessionConfig, temp_root: &Path) -> Result<Prepar
         if !seen.insert(real.clone()) {
             continue;
         }
-        check_manifest(&real).map_err(|what| problem(option, given, what))?;
+        let has_worker = check_manifest(&real).map_err(|what| problem(option, given, what))?;
+        if has_worker {
+            prepared.workers.push(Worker {
+                folder: real.clone(),
+                label: given.clone(),
+            });
+        }
         prepared.folders.push(real);
     }
 
@@ -135,7 +159,7 @@ fn unpack_archive(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> 
 }
 
 /// Checks that `folder` holds a Manifest V3 `manifest.json`.
-fn check_manifest(folder: &Path) -> std::result::Result<(), String> {
+fn check_manifest(folder: &Path) -> std::result::Result<bool, String> {
     let path = folder.join("manifest.json");
     let metadata = fs::metadata(&path)
         .ok()
@@ -158,11 +182,21 @@ fn check_manifest(folder: &Path) -> std::result::Result<(), String> {
             "manifest.json has no manifest_version; only Manifest V3 extensions are loaded"
                 .to_owned(),
         ),
-        Some(version) if version.as_u64() == Some(3) => Ok(()),
+        Some(version) if version.as_u64() == Some(3) => Ok(names_a_service_worker(object)),
         Some(version) => Err(format!(
             "manifest_version is {version}; only Manifest V3 extensions are loaded"
         )),
     }
+}
+
+/// Whether the manifest has a `background.service_worker`, which Chrome starts
+/// as the extension's worker.
+fn names_a_service_worker(manifest: &serde_json::Map<String, Value>) -> bool {
+    manifest
+        .get("background")
+        .and_then(|background| background.get("service_worker"))
+        .and_then(Value::as_str)
+        .is_some_and(|script| !script.trim().is_empty())
 }
 
 #[cfg(test)]

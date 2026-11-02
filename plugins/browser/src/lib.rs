@@ -56,12 +56,14 @@ mod config;
 mod session;
 
 mod source;
+mod workers;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use seleniumbase_rs_plugin::{
-    Capability, Category, Configurable, LaunchSettings, Metadata, PathScope, Plugin, PluginError,
-    Requirements, Result, async_trait, config::options,
+    BrowserHandle, Budgets, Capability, Category, Configurable, LaunchSettings, Metadata,
+    PathScope, Plugin, PluginError, Requirements, Result, async_trait, config::options,
 };
 use tempfile::TempDir;
 
@@ -77,6 +79,8 @@ pub struct BrowserSession {
     config: SessionConfig,
     /// The folders this browser's archives were unpacked into.
     unpacked: Mutex<Vec<TempDir>>,
+    /// The extensions this browser loads that have a service worker.
+    workers: Mutex<Vec<source::Worker>>,
 }
 
 impl BrowserSession {
@@ -99,6 +103,7 @@ impl BrowserSession {
         Self {
             config,
             unpacked: Mutex::new(Vec::new()),
+            workers: Mutex::new(Vec::new()),
         }
     }
 
@@ -111,6 +116,10 @@ impl BrowserSession {
     fn unpacked(&self) -> MutexGuard<'_, Vec<TempDir>> {
         self.unpacked.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    fn workers(&self) -> MutexGuard<'_, Vec<source::Worker>> {
+        self.workers.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// What every instance declares, whatever its options.
@@ -120,6 +129,15 @@ fn declared() -> Metadata {
         .summary("Loads extensions from .zip and .crx files and unpacked folders into the browser it starts")
         .capability(Capability::LaunchExtensions)
         .conflicts_with("crx")
+}
+
+/// The time limits of an instance that waits `seconds` for the workers: the
+/// set's 10 s for `on_browser` would end a longer wait with a bare time-out,
+/// so the hook gets the wait and some headroom.
+fn wait_budgets(seconds: u64) -> Budgets {
+    let mut budgets = Budgets::default();
+    budgets.other = Some(Duration::from_secs(seconds) + workers::HOOK_HEADROOM);
+    budgets
 }
 
 impl Configurable for BrowserSession {
@@ -163,6 +181,11 @@ impl Plugin for BrowserSession {
         if !sources.is_empty() {
             meta = meta.capability(Capability::HostFsRead(PathScope::Declared(sources)));
         }
+        if self.config.wait_for_workers {
+            meta = meta
+                .capability(Capability::Clock)
+                .budget(wait_budgets(self.config.worker_timeout_secs_or_default()));
+        }
         meta
     }
 
@@ -184,6 +207,22 @@ impl Plugin for BrowserSession {
         let prepared = source::prepare(&self.config, &std::env::temp_dir())?;
         launch.extensions.extend(prepared.folders);
         self.unpacked().extend(prepared.temps);
+        self.workers().extend(prepared.workers);
+        Ok(())
+    }
+
+    /// Waits for the extensions' service workers when `wait_for_workers` is
+    /// on.
+    async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
+        if self.config.wait_for_workers {
+            let workers = self.workers().clone();
+            workers::wait(
+                browser,
+                &workers,
+                self.config.worker_timeout_secs_or_default(),
+            )
+            .await?;
+        }
         Ok(())
     }
 

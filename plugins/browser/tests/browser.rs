@@ -10,9 +10,13 @@ use seleniumbase_rs_plugin::{
     LaunchSettings, Metadata, PathScope, Plugin, PluginError, PluginSet, PluginSpec, Registry,
     Requirements, async_trait,
 };
+use seleniumbase_rs_plugin::{CapabilitySet, ExtensionWorker, LoadedExtension};
 use seleniumbase_rs_plugin_browser::{BrowserSession, SessionConfig};
 use seleniumbase_rs_plugin_crx::CrxExtensions;
 use seleniumbase_rs_plugin_testing::block_on;
+use seleniumbase_rs_plugin_testing::{Call, ManualTimer, RecordingBrowser, block_on_advancing};
+use std::time::Duration;
+
 use serde_json::{Map, Value, json};
 use zip::write::SimpleFileOptions;
 
@@ -462,7 +466,6 @@ fn saving_a_session_is_refused_without_unix_file_permissions() {
     // Putting a session back needs no permissions to set.
     BrowserSession::configure(&json!({ "session": "s" })).expect("restoring works anywhere");
 }
-
 
 // ---- unpacking and the launch settings ----
 
@@ -989,6 +992,382 @@ fn the_registry_builds_it_from_options() {
 
     let bad = PluginSpec::new("browser").options(json!({ "extension_zp": [] }));
     assert!(matches!(registry.build(&bad), Err(PluginError::Config(_))));
+}
+
+// ---- wait_for_workers ----
+
+/// How often the wait asks the host.
+const POLL: Duration = Duration::from_millis(250);
+
+/// An unpacked extension whose manifest names a service worker.
+fn unpacked_with_worker(dir: &Path, folder: &str, name: &str) -> PathBuf {
+    let path = dir.join(folder);
+    std::fs::create_dir_all(&path).expect("make a folder");
+    let manifest = format!(
+        r#"{{"manifest_version":3,"name":"{name}","version":"1.0","background":{{"service_worker":"sw.js"}}}}"#
+    );
+    std::fs::write(path.join("manifest.json"), manifest).expect("write the manifest");
+    path
+}
+
+fn worker_of(id: &str) -> ExtensionWorker {
+    ExtensionWorker::new(id, format!("chrome-extension://{id}/sw.js"))
+}
+
+/// A strict set around the plugin `config` builds, with a manual timer when
+/// `timer` is true, checked and launched: the set, the timer and what
+/// `before_launch` produced.
+fn launched_set(
+    config: SessionConfig,
+    timer: bool,
+) -> (PluginSet, Arc<ManualTimer>, LaunchSettings) {
+    let manual = Arc::new(ManualTimer::new());
+    let mut set = PluginSet::strict()
+        .with(plugin(config))
+        .expect("a strict set takes it");
+    if timer {
+        set = set.with_timer(manual.clone());
+    }
+    set.check(&context(true))
+        .expect("the grants cover the options");
+    let mut launch = LaunchSettings::default();
+    block_on(set.before_launch(&mut launch)).expect("before_launch");
+    (set, manual, launch)
+}
+
+/// Runs `on_browser`, moving the timer on whenever the plugin waits.
+fn on_browser(
+    set: &PluginSet,
+    timer: &ManualTimer,
+    browser: &RecordingBrowser,
+) -> Result<(), PluginError> {
+    block_on_advancing(timer, POLL, set.on_browser(browser))
+}
+
+/// The text of the `on_browser` failure of the `browser` plugin.
+fn hook_failure(error: PluginError) -> String {
+    match error {
+        PluginError::Hook {
+            plugin,
+            hook,
+            message,
+        } => {
+            assert_eq!(plugin, "browser");
+            assert_eq!(hook, "on_browser");
+            message
+        }
+        other => panic!("expected a hook failure, got {other:?}"),
+    }
+}
+
+#[test]
+fn it_waits_until_the_worker_shows_up() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "alive");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true);
+    let (set, timer, launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new()
+        .with_extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .with_workers(vec![vec![], vec![], vec![worker_of("aaaa")]]);
+
+    on_browser(&set, &timer, &browser).expect("the worker shows up");
+
+    assert_eq!(browser.calls(), vec![Call::ExtensionWorkers; 3]);
+    assert_eq!(timer.elapsed(), POLL * 2);
+}
+
+#[test]
+fn a_worker_that_is_already_running_costs_no_waiting() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "ready");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true);
+    let (set, timer, launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new()
+        .with_extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .with_workers(vec![vec![worker_of("aaaa")]]);
+    on_browser(&set, &timer, &browser).expect("already there");
+    assert_eq!(browser.calls(), [Call::ExtensionWorkers]);
+    assert_eq!(timer.elapsed(), Duration::ZERO);
+}
+
+#[test]
+fn it_skips_extensions_without_a_worker_and_ones_other_plugins_loaded() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let with = unpacked_with_worker(fixtures.path(), "with", "with");
+    let without = unpacked(fixtures.path(), "without", "without");
+    let config = SessionConfig::new()
+        .with_dir(&with)
+        .with_dir(&without)
+        .with_wait_for_workers(true);
+    let (set, timer, launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new()
+        .with_extensions(vec![
+            LoadedExtension::new("aaaa", launch.extensions[0].clone()),
+            LoadedExtension::new("bbbb", launch.extensions[1].clone()),
+            LoadedExtension::new("zzzz", "/elsewhere/foreign"),
+        ])
+        .with_workers(vec![vec![worker_of("aaaa")]]);
+    on_browser(&set, &timer, &browser).expect("only the extension with a worker is awaited");
+    assert_eq!(timer.elapsed(), Duration::ZERO);
+}
+
+#[test]
+fn another_plugins_worker_does_not_stand_in_for_ours() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "mine");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true)
+        .with_worker_timeout_secs(2);
+    let (set, timer, launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new()
+        .with_extensions(vec![
+            LoadedExtension::new("aaaa", launch.extensions[0].clone()),
+            LoadedExtension::new("zzzz", "/elsewhere/foreign"),
+        ])
+        .with_workers(vec![vec![worker_of("zzzz")]]);
+    let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("ours never runs"));
+    assert!(text.contains("aaaa"), "{text}");
+    assert!(!text.contains("zzzz"), "{text}");
+}
+
+#[test]
+fn it_gives_up_after_the_timeout_naming_the_option_the_extensions_and_the_time() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let running = unpacked_with_worker(fixtures.path(), "running", "running");
+    let stuck = unpacked_with_worker(fixtures.path(), "stuck", "stuck");
+    let config = SessionConfig::new()
+        .with_dir(&running)
+        .with_dir(&stuck)
+        .with_wait_for_workers(true)
+        .with_worker_timeout_secs(3);
+    let (set, timer, launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new()
+        .with_extensions(vec![
+            LoadedExtension::new("aaaa", launch.extensions[0].clone()),
+            LoadedExtension::new("bbbb", launch.extensions[1].clone()),
+        ])
+        .with_workers(vec![vec![worker_of("aaaa")]]);
+
+    let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("bbbb never starts"));
+
+    assert!(text.contains("`wait_for_workers`"), "{text}");
+    assert!(text.contains("bbbb"), "{text}");
+    assert!(
+        text.contains("stuck"),
+        "the folder as the user wrote it: {text}"
+    );
+    assert!(text.contains("after 3 s"), "{text}");
+    assert!(
+        !text.contains("aaaa"),
+        "the running one is not blamed: {text}"
+    );
+    assert_eq!(timer.elapsed(), Duration::from_secs(3));
+}
+
+#[test]
+fn the_default_wait_is_ten_seconds_and_the_longest_is_not_cut_by_the_hook_limit() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "slow");
+    for (config, seconds) in [
+        (
+            SessionConfig::new()
+                .with_dir(&folder)
+                .with_wait_for_workers(true),
+            10,
+        ),
+        (
+            SessionConfig::new()
+                .with_dir(&folder)
+                .with_wait_for_workers(true)
+                .with_worker_timeout_secs(30),
+            30,
+        ),
+    ] {
+        let (set, timer, launch) = launched_set(config, true);
+        let browser = RecordingBrowser::new()
+            .with_extensions(vec![LoadedExtension::new(
+                "aaaa",
+                launch.extensions[0].clone(),
+            )])
+            .with_workers(vec![vec![]]);
+        let error = on_browser(&set, &timer, &browser).expect_err("it never starts");
+        // The plugin's own message, not the bare time-out of the set's limit
+        // for the hook, which is 10 s unless the plugin asks for more.
+        let text = hook_failure(error);
+        assert!(
+            text.contains("no service worker for extension aaaa"),
+            "{text}"
+        );
+        assert!(text.contains(&format!("after {seconds} s")), "{text}");
+        assert_eq!(timer.elapsed(), Duration::from_secs(seconds));
+    }
+}
+
+#[test]
+fn a_host_that_cannot_list_workers_makes_the_launch_fail_naming_the_option() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "needs-host");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true);
+    let (set, timer, launch) = launched_set(config, true);
+    // No script: `extension_workers` answers NotSupported, as the default does.
+    let browser = RecordingBrowser::new().with_extensions(vec![LoadedExtension::new(
+        "aaaa",
+        launch.extensions[0].clone(),
+    )]);
+    let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("not supported"));
+    assert!(text.contains("`wait_for_workers`"), "{text}");
+    assert!(text.contains("service workers"), "{text}");
+    assert_eq!(browser.calls(), [Call::ExtensionWorkers]);
+}
+
+#[test]
+fn a_host_that_reports_no_extension_id_makes_the_launch_fail_naming_the_folder() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "no-ids");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true);
+    let (set, timer, _launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new().with_workers(vec![vec![]]);
+    let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("no ids"));
+    assert!(text.contains("`wait_for_workers`"), "{text}");
+    assert!(text.contains(&folder.display().to_string()), "{text}");
+    assert!(text.contains("id"), "{text}");
+}
+
+#[test]
+fn a_set_without_a_timer_cannot_wait_and_says_so() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "no-clock");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true);
+    let (set, _timer, launch) = launched_set(config, false);
+    let browser = RecordingBrowser::new()
+        .with_extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .with_workers(vec![vec![worker_of("aaaa")]]);
+    let text = hook_failure(block_on(set.on_browser(&browser)).expect_err("no clock"));
+    assert!(text.contains("`wait_for_workers`"), "{text}");
+    assert!(text.contains("clock"), "{text}");
+}
+
+#[test]
+fn nothing_is_asked_when_no_extension_has_a_worker() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked(fixtures.path(), "ext", "no-worker");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true);
+    let (set, timer, _launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new();
+    on_browser(&set, &timer, &browser).expect("nothing to wait for");
+    assert!(browser.calls().is_empty());
+}
+
+#[test]
+fn a_failing_host_query_fails_the_hook() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "broken-host");
+    let config = SessionConfig::new()
+        .with_dir(&folder)
+        .with_wait_for_workers(true);
+    let (set, timer, launch) = launched_set(config, true);
+    let browser = RecordingBrowser::new()
+        .with_extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .with_workers(vec![vec![]])
+        .failing("extension_workers");
+    let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("the host fails"));
+    assert!(text.contains("extension_workers"), "{text}");
+}
+
+#[test]
+fn without_wait_for_workers_on_browser_asks_nothing() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "no-wait");
+    let (set, timer, _launch) = launched_set(SessionConfig::new().with_dir(&folder), true);
+    let browser = RecordingBrowser::new();
+    on_browser(&set, &timer, &browser).expect("nothing to do");
+    assert!(browser.calls().is_empty());
+}
+
+#[test]
+fn waiting_asks_for_the_clock_and_a_longer_limit_for_on_browser_only() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "meta");
+    let base = || SessionConfig::new().with_dir(&folder);
+
+    let off = plugin(base()).metadata();
+    assert!(!off.capabilities.covers(&Capability::Clock));
+    assert_eq!(off.budgets.limit_for("on_browser"), Duration::from_secs(10));
+
+    let on = plugin(base().with_wait_for_workers(true)).metadata();
+    assert!(on.capabilities.covers(&Capability::Clock));
+    assert!(on.capabilities.covers(&Capability::LaunchExtensions));
+    assert_eq!(on.budgets.limit_for("on_browser"), Duration::from_secs(15));
+    assert_eq!(
+        on.budgets.limit_for("before_launch"),
+        Duration::from_secs(30)
+    );
+    assert_eq!(
+        on.budgets.limit_for("before_close"),
+        Duration::from_secs(10)
+    );
+
+    let slow = plugin(
+        base()
+            .with_wait_for_workers(true)
+            .with_worker_timeout_secs(30),
+    )
+    .metadata();
+    assert_eq!(
+        slow.budgets.limit_for("on_browser"),
+        Duration::from_secs(35)
+    );
+}
+
+#[test]
+fn a_set_that_withholds_the_clock_refuses_the_wait_at_start_up() {
+    let fixtures = tempfile::tempdir().expect("temp dir");
+    let folder = unpacked_with_worker(fixtures.path(), "ext", "no-grant");
+    let waiting = plugin(
+        SessionConfig::new()
+            .with_dir(&folder)
+            .with_wait_for_workers(true),
+    );
+    let grants: CapabilitySet = waiting
+        .metadata()
+        .capabilities
+        .iter()
+        .filter(|capability| **capability != Capability::Clock)
+        .cloned()
+        .collect();
+    let set = PluginSet::strict()
+        .with_grants(waiting, grants)
+        .expect("a strict set takes it");
+    let error = set.check(&context(true)).expect_err("clock is not granted");
+    assert!(
+        matches!(&error, PluginError::Capability { plugin, capability, .. } if plugin == "browser" && capability == "clock"),
+        "{error:?}"
+    );
 }
 
 // ---- order against a privacy plugin such as tor (spec 8, question 11) ----
