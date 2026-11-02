@@ -195,6 +195,8 @@ pub struct BrowserId(Arc<str>); pub struct PageId(Arc<str>); pub struct ContextI
     async fn send(&self, method: &str, params: Value) -> Result<Value>;
     fn id(&self) -> BrowserId { BrowserId::unknown() }
     fn extensions(&self) -> Vec<LoadedExtension> { Vec::new() }         // ids core keeps from Extensions.loadUnpacked
+    async fn extension_workers(&self) -> Result<Vec<ExtensionWorker>> { Err(unsupported("extension_workers")) } // running MV3 workers; needs launch.extensions
+    fn clock(&self) -> Option<Clock> { None }                           // the set's clock for a plugin that holds Capability::Clock
     async fn new_context<'a>(&'a self, _s: ContextSettings) -> Result<Box<dyn ContextHandle + 'a>> { Err(unsupported("new_context")) }
     async fn new_page<'a>(&'a self, _url: Option<&str>) -> Result<Box<dyn PageHandle + 'a>> { Err(unsupported("new_page")) }
 }
@@ -1082,6 +1084,15 @@ impl Task for Crawler {
 ### browser (category 3)
 
 Interactive session handling, and extension lifetime bound to the browser. Its config type is `SessionConfig`, to avoid a clash with core's `BrowserConfig`.
+
+> **As built** (`plugins/browser`, `docs/design/browser_session_options.md`). The sketch below is the design; the code differs here:
+>
+> - The extension options are Python's `extension_zip` and `extension_dir`, not an `extensions` list with `expect_id`.
+> - `wait_for_workers` **polls**: `BrowserHandle::extension_workers()` every 250 ms, on `BrowserHandle::clock()`, until each extension of the plugin that has a `background.service_worker` has a running worker. It does not use `cdp:Target` or `Target.targetCreated`: `cdp:Target` is Critical and the host never grants it, and the host forwards no protocol event while `on_browser` runs and never turns target discovery on. It is **off** by default (a host without `extension_workers` would fail every extension config) and `worker_timeout_secs` is 1 to 30 (default 10). The plugin asks for a longer `on_browser` limit (the wait plus 5 s).
+> - `session` keeps **cookies only** (`Storage.getCookies`, `Storage.setCookies`; no localStorage: DOM storage is per tab and the handle cannot list tabs) in `<session_dir>/<session>.json`. `session_dir` (default `saved_sessions`) is an option the sketch does not have, because the API has no state folder. Files are made with mode 0600 through a temporary file and a rename.
+> - `interactive` is a task only when the option is on; the plugin declares `Capability::Task`, `CookiesRead`, `CookiesWrite` for the instance that needs them (not `Cdp("Target")`, `Cdp("Extensions")` or `Contexts`), and `Requirements::HEADFUL`.
+> - `BrowserHandle` gained `clock()` and `extension_workers()` (default bodies); `Guarded` passes them on.
+
 
 ```rust
 #[derive(Clone, Debug, Deserialize)] #[serde(default, deny_unknown_fields)]

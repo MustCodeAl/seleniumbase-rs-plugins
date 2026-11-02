@@ -7,6 +7,79 @@ version; it stays 0.1.x until the next release.
 
 ### Added
 
+- `seleniumbase-rs-plugin`: two methods of `BrowserHandle`, both with a default
+  body so no host or plugin has to change: `clock() -> Option<Clock>` (`None`),
+  a clock for sleeping and time limits inside a hook such as `on_browser`, which
+  gets no task context; and `async extension_workers() ->
+  Result<Vec<ExtensionWorker>>` (`PluginError::NotSupported`), the service
+  workers of the extensions the browser loaded that are running now. The new
+  `ExtensionWorker { id, url }` is `#[non_exhaustive]`. `Guarded` passes both on,
+  which it has to: without that the trait defaults would hide the host's own
+  answers from every plugin. `Guarded::clock` gives the set's clock (else the
+  host handle's own) only to a plugin that holds `Capability::Clock`, which
+  makes that capability mean something for the first time; `extension_workers`
+  needs `Capability::LaunchExtensions`. No `Capability` variant and no
+  `HostInfo` flag was added: `HostInfo::supports` answers per capability, so it
+  cannot say whether a host implements one method; a host that does not makes
+  the plugin that needs it fail at its first use, naming the option. The core
+  has to implement `extension_workers` (see the notes of the `browser` plugin).
+  A version bump is the owner's call.
+- `seleniumbase-rs-plugin-testing`: `RecordingBrowser::{with_workers,
+  with_clock, replying}` (a script of `extension_workers` snapshots, one per call
+  with the last repeating; a clock; canned answers to browser-level commands),
+  `failing("extension_workers")`, `Call::ExtensionWorkers`, and
+  `block_on_advancing(&ManualTimer, step, future)`, which moves the timer on
+  whenever the future is pending so poll loops and time limits finish in a test.
+  `Call` is now `#[non_exhaustive]`: a `match` on it from outside the crate needs
+  a wildcard arm.
+- `seleniumbase-rs-plugin-browser`: the options of the design that were left out
+  of the first release. All are off by default, and a combination that makes no
+  sense is a `PluginError::Config` that starts with `browser:` and names the
+  option, when the plugin is built:
+  - `wait_for_workers` and `worker_timeout_secs` (1 to 30, default 10): in
+    `on_browser`, wait until each extension this plugin loaded whose manifest has
+    a `background.service_worker` has a running worker (polled every 250 ms with
+    `BrowserHandle::extension_workers` and `clock`). It is **off by default**, not
+    on as in the ADR: a host without `extension_workers` would fail every config
+    that loads an extension. The instance asks for `Capability::Clock` and for a
+    limit of the wait plus 5 s for `on_browser` (the set's default is 10 s).
+    Extensions without a service worker and extensions another plugin loaded are
+    not waited for. A host that cannot list workers, that reports no id for an
+    extension (WebDriver), or a set without a timer fails the launch with a
+    message that names `wait_for_workers`; a timeout names the extensions and
+    the time.
+  - `session`, `save_on_close` and `session_dir` (not in the ADR; default
+    `saved_sessions` in the working directory, made absolute when the plugin is
+    built): the cookies of the browser's default context are put back at launch
+    from `<session_dir>/<session>.json` and, with `save_on_close`, written in
+    `before_close`, through `Storage.getCookies` and `Storage.setCookies`. Only
+    cookies: localStorage and sessionStorage need a tab list the API cannot give
+    (`cdp:Target` is Critical). The file is written through a temporary file made
+    with mode `0600` and renamed over the target; a folder the plugin makes gets
+    `0700`; a symbolic link or a folder at the target is refused; the folder is
+    tested for writing at launch. Reading refuses a file larger than 8 MiB, with
+    more than 5000 cookies, corrupt or of another version, drops cookies that
+    expired, and sends only `name`, `value`, `domain`, `path`, `expires`,
+    `httpOnly`, `secure`, `sameSite`, `priority`, `sourceScheme`, `sourcePort`
+    and `partitionKey`. No error, task result or `Debug` output carries a cookie
+    value (a syntax error names a line and a column; a browser message that
+    repeats a value has it removed). Saving is refused where there are no Unix
+    file permissions. Capabilities: `cookies.write`, with saving `cookies.read`
+    and `host.fs.write` for the folder, `host.fs.read` for the file.
+  - `interactive` and `pause_message`: `Plugin::task` returns the plugin only
+    when `interactive` is on. `sbrs plugin run browser --headed --input
+    login.json` opens a tab (`url` of the input, `http` or `https` only), waits on
+    the host's prompt for a person to sign in, saves the session and returns
+    `{"session", "cookies"}`. The plugin requires `Requirements::HEADFUL` and
+    `Capability::Task` (so a headless launch and the WebDriver host are refused
+    at the check); a prompt that cannot wait (`NoPrompt`, MCP) fails with
+    "`interactive` needs a person at the keyboard"; an unwritable folder is found
+    out before the person is asked.
+  - `describe()` lists `cookies.read`, `cookies.write`, `clock`, `task` and
+    `page.navigate` as optional, so `sbrs plugin info browser` stays truthful.
+    The tests use fakes only; nothing has run in a real Chrome.
+- A design note for the three groups of options:
+  `docs/design/browser_session_options.md`.
 - `seleniumbase-rs-plugin-tor`: the `tor` plugin (category Privacy, a Chromium
   browser the program starts, pure CDP engine). It sends the browser's traffic
   through a local Tor daemon's SocksPort (`127.0.0.1:9050` unless `socks` says
@@ -60,11 +133,8 @@ version; it stays 0.1.x until the next release.
   `LaunchSettings::extensions` and no switch. It conflicts with `crx`: one
   extension loader per set. Capabilities: `LaunchExtensions`, `host.fs.read` for
   the configured paths and, with archives, `host.fs.write` for a temporary
-  folder. The options `wait_for_workers`, `worker_timeout_secs`, `session`,
-  `save_on_close`, `interactive` and `pause_message` of the design are not
-  implemented yet (they need plugin API hooks that do not exist) and are
-  refused as unknown options. The tests drive the plugin through a plugin set;
-  nothing has run in a real Chrome.
+  folder. The tests drive the plugin through a plugin set; nothing has run in a
+  real Chrome. The worker, session and sign-in options came after (see above).
 - `seleniumbase-rs-plugins-builtin`: the `browser` feature and a registry entry
   for it, last in `registry()` after `crawler`. `browser` and `crx` cannot share
   a set: `Registry::plugin_set` only refuses a duplicate name, so a set with both

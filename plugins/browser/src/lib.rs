@@ -1,7 +1,7 @@
 //! Loads browser extensions into the Chromium browser seleniumbase-rs starts,
 //! from `.zip` and `.crx` files and from unpacked folders.
 //!
-//! The two options are the ones Python SeleniumBase has, with the same
+//! The two extension options are the ones Python SeleniumBase has, with the same
 //! meaning: `extension_zip` is `--extension-zip` (`.zip` or `.crx` files) and
 //! `extension_dir` is `--extension-dir` (unpacked folders). Archives are
 //! unpacked, with the `crx` plugin's code, into a temporary folder that belongs
@@ -45,12 +45,28 @@
 //! this plugin. The one thing it refuses is an explicit `--headless=old`
 //! switch, which could only lose the extensions without a word.
 //!
-//! # Not built yet
+//! # Waiting for workers, saved sessions, signing in
 //!
-//! The design also has `wait_for_workers`, `session`, `interactive` and
-//! friends. They need hooks the plugin API does not offer yet (a clock in
-//! `on_browser`, a folder for saved sessions), so they are refused as unknown
-//! options instead of being accepted and ignored.
+//! Three more groups of options use the newer parts of the plugin API. A
+//! combination that makes no sense is an error that names the option, before
+//! any browser starts; an option the host cannot serve fails the launch and
+//! names it too. Nothing is accepted and then ignored.
+//!
+//! - `wait_for_workers` (with `worker_timeout_secs`, 10 s unless told otherwise)
+//!   makes `on_browser` wait until each extension of this plugin that has a
+//!   `background.service_worker` has a running worker. It is off by default and
+//!   needs a host that implements `BrowserHandle::extension_workers`.
+//! - `session` names a saved session: the cookies of the default browser
+//!   context, kept in `<session_dir>/<session>.json` (`saved_sessions` in the
+//!   working directory unless `session_dir` says otherwise). They are put back
+//!   at launch, and with `save_on_close` written just before the browser
+//!   closes, through a file only its owner can read. localStorage is not kept.
+//! - `interactive` (with `pause_message`) offers the task
+//!   `sbrs plugin run browser`: it opens a tab, waits for a person to sign in
+//!   by hand in the headed browser, and saves the session.
+//!
+//! The cookie file holds credentials: no error, log line or `Debug` output
+//! carries a value of it. Nothing here has run in a real Chrome.
 
 mod config;
 mod interactive;
@@ -96,8 +112,12 @@ impl BrowserSession {
     ///
     /// # Errors
     ///
-    /// [`PluginError::Config`] for an empty entry, or for a folder whose path
-    /// holds a comma.
+    /// [`PluginError::Config`] for an empty entry, for a folder whose path holds
+    /// a comma, and for options that make no sense together (`wait_for_workers`
+    /// without an extension, `save_on_close` without `session`, a bad session
+    /// name, a number out of range, ...); the message names the option. Also
+    /// when `session_dir` is relative and the working directory is unknown.
+    /// Nothing is read or written yet.
     pub fn new(config: SessionConfig) -> Result<Self> {
         config.check()?;
         let store = session::Store::from_config(&config)?;
@@ -162,8 +182,11 @@ impl Configurable for BrowserSession {
             .optional(Capability::PageNavigate)
     }
 
-    /// Options: `extension_zip` and `extension_dir`, each a list of paths or a
-    /// comma-separated text.
+    /// Options: `extension_zip` and `extension_dir` (each a list of paths or a
+    /// comma-separated text), and `wait_for_workers`, `worker_timeout_secs`,
+    /// `session`, `save_on_close`, `session_dir`, `interactive` and
+    /// `pause_message`; see [`SessionConfig`].
+    /// The files are looked at at launch, not here.
     fn configure(value: &serde_json::Value) -> Result<Self> {
         Self::new(options::<SessionConfig>(NAME, value)?)
     }
@@ -223,7 +246,9 @@ impl Plugin for BrowserSession {
         }
     }
 
-    /// The capabilities this instance needs: the declared ones, the temporary
+    /// The capabilities this instance needs: the declared ones, cookie access
+    /// and the session file for a session, the clock (and a longer limit for
+    /// `on_browser`) for the wait, the task for `interactive`, the temporary
     /// folder only when it has archives to unpack, and the paths it reads.
     fn metadata(&self) -> Metadata {
         let mut meta = declared();
@@ -291,7 +316,8 @@ impl Plugin for BrowserSession {
     }
 
     /// Waits for the extensions' service workers when `wait_for_workers` is
-    /// on.
+    /// on, then puts the saved session back (`session`) and, when it will be
+    /// saved, checks that its folder can be written.
     async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
         if self.config.wait_for_workers {
             let workers = self.workers().clone();

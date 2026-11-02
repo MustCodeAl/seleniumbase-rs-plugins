@@ -95,7 +95,12 @@ that repeats a value is scrubbed.
 ### `interactive`
 
 `Plugin::task()` returns the plugin only when `interactive` is on, so
-`sbrs plugin run browser` exists only then.
+`sbrs plugin run browser` finds a task only then. It is started as
+`sbrs plugin run browser --headed --input login.json` (the input is a JSON file;
+`--headed` is the global flag the run command honours), with the options in the
+config file or in `--plugin-opt`. The host builds its list of plugins with a
+task from default options, so it does not name `browser` in the error it prints
+for a name that has no task.
 
 1. Check that the session file can be written (before a person spends time).
 2. Open a tab (`input.url`, only `http` or `https`; none gives a blank tab).
@@ -121,9 +126,12 @@ All additions have default bodies, so no host or plugin changes shape.
 - `ExtensionWorker { id, url }`, `#[non_exhaustive]`, with `new`.
 - `Guarded` forwards both: without that, the trait default would shadow the
   host's implementation for every plugin.
-- `seleniumbase-rs-plugin-testing`: `RecordingBrowser::{with_extensions,
-  with_workers, with_clock, replying, failing}`, `Call::ExtensionWorkers`
-  (`Call` becomes `#[non_exhaustive]`), `block_on_advancing`.
+- `seleniumbase-rs-plugin-testing`: `RecordingBrowser::{with_workers,
+  with_clock, replying}` (`with_extensions` and `failing` were already there,
+  in `contexts.rs`; `failing("extension_workers")` now works too),
+  `Call::ExtensionWorkers` (`Call` becomes `#[non_exhaustive]`), and
+  `block_on_advancing`, which moves a `ManualTimer` on whenever the future is
+  pending.
 
 No `Capability` variant and no `HostInfo` flag is added: `HostInfo::supports`
 answers per capability, so it cannot say whether a core implements one method.
