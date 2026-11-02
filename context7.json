@@ -20,7 +20,7 @@
     "LICENSE"
   ],
   "rules": [
-    "These crates are not on crates.io: depend on them by git URL, for example cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins. They need Rust 1.88 and edition 2024.",
+    "These crates are not on crates.io: depend on them by git URL, for example cargo add seleniumbase-rs-plugin-crx --git https://github.com/MustCodeAl/seleniumbase-rs-plugins. They need Rust 1.99 and edition 2024.",
     "seleniumbase-rs's plugins feature takes seleniumbase-rs-plugin from this git URL with no rev. Add plugin crates the same way, or Cargo builds two seleniumbase-rs-plugin crates and the Plugin trait does not match.",
     "With seleniumbase-rs 0.3.0 or later, enable its plugins feature and pass the set to LaunchOptions::builder().plugins(set). The hooks run in the pure CDP engine (sb_cdp), not yet in BaseCase (WebDriver).",
     "Implement Plugin from seleniumbase-rs-plugin (it re-exports async_trait): only name() is required; before_launch, on_browser, on_page_created and on_close are optional. A plugin crate depends on seleniumbase-rs-plugin, never on seleniumbase-rs.",
