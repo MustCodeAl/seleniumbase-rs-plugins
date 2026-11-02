@@ -34,6 +34,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
 use seleniumbase_rs_plugin::{
     BrowserFamily, BrowserHandle, Engine, PageHandle, PluginError, Result, async_trait,
@@ -41,7 +42,9 @@ use seleniumbase_rs_plugin::{
 use serde_json::Value;
 use std::sync::Arc;
 
-use seleniumbase_rs_plugin::{ContextHandle, ContextId, ContextSettings, LoadedExtension, PageId};
+use seleniumbase_rs_plugin::{
+    Clock, ContextHandle, ContextId, ContextSettings, ExtensionWorker, LoadedExtension, PageId,
+};
 
 mod contexts;
 mod drive;
@@ -53,6 +56,8 @@ pub use timer::ManualTimer;
 
 /// One thing a plugin asked a fake handle to do.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+
 pub enum Call {
     /// A DevTools Protocol command with its parameters.
     Send(String, Value),
@@ -74,6 +79,8 @@ pub enum Call {
     NewPage(Option<String>),
     /// A request to dispose a context.
     Dispose,
+    /// A question about the extension service workers that run now.
+    ExtensionWorkers,
 }
 
 #[derive(Debug, Default)]
@@ -297,6 +304,14 @@ impl PageHandle for RecordingPage {
     }
 }
 
+/// The answers of [`BrowserHandle::extension_workers`]: one snapshot for each
+/// call, the last one repeating.
+#[derive(Debug, Default)]
+struct WorkerScript {
+    snapshots: Vec<Vec<ExtensionWorker>>,
+    next: usize,
+}
+
 /// A fake browser that records what a plugin asks of it.
 #[derive(Debug)]
 pub struct RecordingBrowser {
@@ -305,6 +320,9 @@ pub struct RecordingBrowser {
     recorder: Arc<Recorder>,
     world: Option<Arc<contexts::World>>,
     extensions: Vec<LoadedExtension>,
+    workers: Mutex<WorkerScript>,
+    clock: Option<Clock>,
+
     made_contexts: Mutex<Vec<FakeContext>>,
     made_pages: Mutex<Vec<RecordingPage>>,
 }
@@ -331,9 +349,41 @@ impl RecordingBrowser {
             recorder: Arc::default(),
             world: None,
             extensions: Vec::new(),
+            workers: Mutex::default(),
+            clock: None,
             made_contexts: Mutex::default(),
             made_pages: Mutex::default(),
         }
+    }
+
+    /// Scripts [`BrowserHandle::extension_workers`]: the first call answers
+    /// with the first snapshot, the second with the second, and the last one
+    /// repeats. Without a script the call answers
+    /// [`PluginError::NotSupported`], as a host without the query does.
+    #[must_use]
+    pub fn with_workers(mut self, snapshots: Vec<Vec<ExtensionWorker>>) -> Self {
+        self.workers = Mutex::new(WorkerScript { snapshots, next: 0 });
+        self
+    }
+
+    /// Gives the browser a clock, which [`BrowserHandle::clock`] reports. A
+    /// browser reached through a plugin set reports the set's clock first.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    /// Makes the browser-level command `method` answer with `reply` (otherwise
+    /// `null`).
+    #[must_use]
+    pub fn replying(self, method: &str, reply: Value) -> Self {
+        self.recorder
+            .replies
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(method.to_owned(), reply);
+        self
     }
 
     /// Everything the plugins asked for, in order.
@@ -355,6 +405,22 @@ impl BrowserHandle for RecordingBrowser {
 
     fn extensions(&self) -> Vec<LoadedExtension> {
         self.extensions.clone()
+    }
+
+    async fn extension_workers(&self) -> Result<Vec<ExtensionWorker>> {
+        self.recorder.record(Call::ExtensionWorkers);
+        self.recorder.answer("extension_workers")?;
+        let mut script = self.workers.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(last) = script.snapshots.len().checked_sub(1) else {
+            return Err(PluginError::unsupported("extension_workers"));
+        };
+        let at = script.next.min(last);
+        script.next = at + 1;
+        Ok(script.snapshots[at].clone())
+    }
+
+    fn clock(&self) -> Option<Clock> {
+        self.clock.clone()
     }
 
     async fn new_context<'a>(
@@ -387,5 +453,39 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
             return output;
         }
         std::thread::yield_now();
+    }
+}
+
+/// Like [`block_on`] for a future that waits on a [`ManualTimer`]: whenever the
+/// future is pending, the timer moves on by `step`, so poll loops and time
+/// limits finish without a real wait. A future that waits for something other
+/// than the timer never finishes.
+///
+/// ```
+/// use std::sync::Arc;
+/// use std::time::Duration;
+/// use seleniumbase_rs_plugin::Clock;
+/// use seleniumbase_rs_plugin_testing::{block_on_advancing, ManualTimer};
+///
+/// let timer = Arc::new(ManualTimer::new());
+/// let clock = Clock::new(timer.clone());
+/// let answer = block_on_advancing(&timer, Duration::from_secs(1), async {
+///     clock.sleep(Duration::from_secs(5)).await;
+///     "done"
+/// });
+/// assert_eq!(answer, "done");
+/// assert_eq!(timer.elapsed(), Duration::from_secs(5));
+/// ```
+pub fn block_on_advancing<F: Future>(timer: &ManualTimer, step: Duration, future: F) -> F::Output {
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    let mut future = pin!(future);
+    let mut context = Context::from_waker(Waker::noop());
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
+        timer.advance(step);
     }
 }

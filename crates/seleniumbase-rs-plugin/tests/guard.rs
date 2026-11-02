@@ -1209,3 +1209,193 @@ fn without_a_timer_nothing_times_out() {
         ["quick:on_page_created", "quick:before_navigate"]
     );
 }
+
+// The questions a plugin can ask the browser it gets in `on_browser`:
+// `extension_workers` and `clock`. The guarded handle must pass the host's
+// answers on, or the trait defaults would hide them.
+
+mod host_queries {
+    use super::*;
+    use seleniumbase_rs_plugin::{Clock, ExtensionWorker};
+
+    /// What `Asker` saw in its `on_browser`.
+    #[derive(Default)]
+    struct Seen {
+        workers: Option<Result<Vec<ExtensionWorker>>>,
+        clock: Option<Option<Clock>>,
+    }
+
+    /// A plugin that asks the browser handle for the workers and the clock.
+    struct Asker {
+        caps: Vec<Capability>,
+        seen: Arc<Mutex<Seen>>,
+    }
+
+    impl Asker {
+        fn new(caps: Vec<Capability>) -> (Self, Arc<Mutex<Seen>>) {
+            let seen = Arc::new(Mutex::new(Seen::default()));
+            (
+                Self {
+                    caps,
+                    seen: Arc::clone(&seen),
+                },
+                seen,
+            )
+        }
+    }
+
+    #[async_trait]
+    impl Plugin for Asker {
+        fn name(&self) -> &str {
+            "asker"
+        }
+
+        fn metadata(&self) -> Metadata {
+            Metadata::new(Category::Core).capabilities(self.caps.clone())
+        }
+
+        async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
+            let workers = browser.extension_workers().await;
+            let clock = browser.clock();
+            let mut seen = self.seen.lock().unwrap();
+            seen.workers = Some(workers);
+            seen.clock = Some(clock);
+            Ok(())
+        }
+    }
+
+    fn worker() -> ExtensionWorker {
+        ExtensionWorker::new("abcdefgh", "chrome-extension://abcdefgh/sw.js")
+    }
+
+    #[test]
+    fn a_worker_knows_its_extension_and_script() {
+        let worker = worker();
+        assert_eq!(worker.id, "abcdefgh");
+        assert_eq!(worker.url, "chrome-extension://abcdefgh/sw.js");
+    }
+
+    #[test]
+    fn a_plugin_that_loads_extensions_gets_the_hosts_workers() {
+        let (asker, seen) = Asker::new(vec![Capability::LaunchExtensions]);
+        let set = PluginSet::new().with(asker).unwrap();
+        let browser = RecordingBrowser::new().with_workers(vec![vec![worker()]]);
+
+        block_on(set.on_browser(&browser)).unwrap();
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.workers.as_ref().unwrap().as_ref().unwrap(),
+            &[worker()]
+        );
+        assert_eq!(browser.calls(), [Call::ExtensionWorkers]);
+    }
+
+    #[test]
+    fn a_plugin_that_does_not_load_extensions_is_refused_before_the_host_is_asked() {
+        let (asker, seen) = Asker::new(Vec::new());
+        let set = PluginSet::new().with(asker).unwrap();
+        let browser = RecordingBrowser::new().with_workers(vec![vec![worker()]]);
+
+        block_on(set.on_browser(&browser)).unwrap();
+
+        let seen = seen.lock().unwrap();
+        let error = seen.workers.as_ref().unwrap().as_ref().unwrap_err();
+        assert!(
+            matches!(error, PluginError::Capability { capability, .. } if capability == "launch.extensions"),
+            "{error:?}"
+        );
+        assert!(
+            browser.calls().is_empty(),
+            "the host never saw the question"
+        );
+    }
+
+    #[test]
+    fn a_host_without_the_query_says_it_is_not_supported() {
+        let (asker, seen) = Asker::new(vec![Capability::LaunchExtensions]);
+        let set = PluginSet::new().with(asker).unwrap();
+        let browser = RecordingBrowser::new();
+
+        block_on(set.on_browser(&browser)).unwrap();
+
+        let seen = seen.lock().unwrap();
+        let error = seen.workers.as_ref().unwrap().as_ref().unwrap_err();
+        assert!(
+            matches!(error, PluginError::NotSupported(what) if what == "extension_workers"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn the_snapshots_of_the_fake_come_one_per_call_and_the_last_repeats() {
+        let browser = RecordingBrowser::new().with_workers(vec![Vec::new(), vec![worker()]]);
+        assert!(block_on(browser.extension_workers()).unwrap().is_empty());
+        assert_eq!(block_on(browser.extension_workers()).unwrap(), [worker()]);
+        assert_eq!(block_on(browser.extension_workers()).unwrap(), [worker()]);
+        assert_eq!(browser.calls(), vec![Call::ExtensionWorkers; 3]);
+    }
+
+    #[test]
+    fn a_plugin_with_the_clock_capability_gets_the_sets_clock() {
+        let (asker, seen) = Asker::new(vec![Capability::Clock]);
+        let timer = Arc::new(ManualTimer::new());
+        let set = PluginSet::new()
+            .with(asker)
+            .unwrap()
+            .with_timer(timer.clone());
+
+        block_on(set.on_browser(&RecordingBrowser::new())).unwrap();
+
+        let seen = seen.lock().unwrap();
+        let clock = seen.clock.as_ref().unwrap().as_ref().expect("a clock");
+        assert_eq!(clock.now_ms(), seen_timer_ms(&timer));
+        timer.advance(Duration::from_secs(2));
+        assert_eq!(clock.now_ms(), seen_timer_ms(&timer));
+    }
+
+    fn seen_timer_ms(timer: &ManualTimer) -> u64 {
+        use seleniumbase_rs_plugin::Timer;
+        timer.now_ms()
+    }
+
+    #[test]
+    fn without_the_clock_capability_or_a_timer_there_is_no_clock() {
+        // No grant: the set has a timer, the plugin may not use it.
+        let (asker, seen) = Asker::new(Vec::new());
+        let set = PluginSet::new()
+            .with(asker)
+            .unwrap()
+            .with_timer(Arc::new(ManualTimer::new()));
+        block_on(set.on_browser(&RecordingBrowser::new())).unwrap();
+        assert!(seen.lock().unwrap().clock.as_ref().unwrap().is_none());
+
+        // A grant but no timer in the set and none in the host.
+        let (asker, seen) = Asker::new(vec![Capability::Clock]);
+        let set = PluginSet::new().with(asker).unwrap();
+        block_on(set.on_browser(&RecordingBrowser::new())).unwrap();
+        assert!(seen.lock().unwrap().clock.as_ref().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_host_clock_is_used_when_the_set_has_no_timer_and_only_for_a_plugin_that_holds_clock() {
+        let timer = Arc::new(ManualTimer::new());
+        let host_clock = Clock::new(timer.clone());
+
+        let (asker, seen) = Asker::new(vec![Capability::Clock]);
+        let set = PluginSet::new().with(asker).unwrap();
+        let browser = RecordingBrowser::new().with_clock(host_clock);
+        block_on(set.on_browser(&browser)).unwrap();
+        assert!(seen.lock().unwrap().clock.as_ref().unwrap().is_some());
+
+        let (asker, seen) = Asker::new(Vec::new());
+        let set = PluginSet::new().with(asker).unwrap();
+        block_on(set.on_browser(&browser)).unwrap();
+        assert!(seen.lock().unwrap().clock.as_ref().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_raw_handle_has_no_clock_by_default() {
+        assert!(RecordingBrowser::new().clock().is_none());
+    }
+}

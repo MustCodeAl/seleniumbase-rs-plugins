@@ -1,12 +1,17 @@
 //! The fakes behave like the handles they stand in for.
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use seleniumbase_rs_plugin::Clock;
 use seleniumbase_rs_plugin::Sink;
 use seleniumbase_rs_plugin::{
     BrowserHandle, ContextSettings, Engine, LoadedExtension, PageHandle, PluginError, PluginSet,
     RequestDecision, RequestView, ResourceKind, ResponseView,
 };
 use seleniumbase_rs_plugin_testing::{
-    Call, RecordingBrowser, RecordingPage, VecSink, block_on, drive_request, drive_response,
+    Call, ManualTimer, RecordingBrowser, RecordingPage, VecSink, block_on, block_on_advancing,
+    drive_request, drive_response,
 };
 use serde_json::json;
 
@@ -153,4 +158,53 @@ fn the_drive_helpers_run_a_set_like_the_host_and_the_sink_keeps_lines() {
     sink.record(&json!({"n": 1})).unwrap();
     sink.record(&json!({"n": 2})).unwrap();
     assert_eq!(sink.lines(), [json!({"n": 1}), json!({"n": 2})]);
+}
+
+#[test]
+fn a_browser_answers_a_command_with_the_reply_it_was_given() {
+    let browser = RecordingBrowser::new().replying("Storage.getCookies", json!({ "cookies": [] }));
+    assert_eq!(
+        block_on(browser.send("Storage.getCookies", json!({}))).unwrap(),
+        json!({ "cookies": [] })
+    );
+    assert_eq!(
+        block_on(browser.send("Browser.getVersion", json!({}))).unwrap(),
+        json!(null),
+        "other commands answer null"
+    );
+}
+
+#[test]
+fn the_worker_query_is_recorded_and_can_fail_or_be_unsupported() {
+    let plain = RecordingBrowser::new();
+    assert!(matches!(
+        block_on(plain.extension_workers()),
+        Err(PluginError::NotSupported(what)) if what == "extension_workers"
+    ));
+    let failing = RecordingBrowser::new()
+        .with_workers(vec![Vec::new()])
+        .failing("extension_workers");
+    assert!(matches!(
+        block_on(failing.extension_workers()),
+        Err(PluginError::Other(_))
+    ));
+    assert_eq!(failing.calls(), [Call::ExtensionWorkers]);
+}
+
+#[test]
+fn a_clock_given_to_the_browser_is_reported() {
+    assert!(RecordingBrowser::new().clock().is_none());
+    let timer = Arc::new(ManualTimer::new());
+    let browser = RecordingBrowser::new().with_clock(Clock::new(timer));
+    assert!(browser.clock().is_some());
+}
+
+#[test]
+fn block_on_advancing_moves_the_timer_so_a_time_limit_runs_out() {
+    let timer = Arc::new(ManualTimer::new());
+    let clock = Clock::new(timer.clone());
+    let waiting = clock.timeout(Duration::from_secs(5), std::future::pending::<()>());
+    let outcome = block_on_advancing(&timer, Duration::from_millis(250), waiting);
+    assert!(matches!(outcome, Err(PluginError::Timeout(limit)) if limit == Duration::from_secs(5)));
+    assert_eq!(timer.elapsed(), Duration::from_secs(5));
 }

@@ -221,7 +221,7 @@ impl RecordingBrowser {
         self
     }
 
-    /// Makes `method` (`"new_context"`, `"new_page"`, `"dispose"` or a protocol
+    /// Makes `method` (`"new_context"`, `"new_page"`, `"dispose"`, `"extension_workers"` or a protocol
     /// command) answer with an error.
     #[must_use]
     pub fn failing(self, method: &str) -> Self {
