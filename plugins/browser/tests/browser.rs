@@ -1850,6 +1850,42 @@ mod sessions {
     }
 
     #[test]
+    fn save_on_close_is_refused_where_the_host_does_not_run_before_close() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let set = session_set(&dir, true);
+        // The WebDriver host calls `on_browser` and `on_close`, never
+        // `before_close`, so nothing would ever save the session.
+        let browser = RecordingBrowser::of(Engine::WebDriver, BrowserFamily::Chromium)
+            .replying("Storage.getCookies", chrome_cookies());
+
+        let error = block_on(set.on_browser(&browser)).expect_err("nothing would save it");
+
+        let message = session_failure(&error, "on_browser");
+        assert!(message.contains("`save_on_close`"), "{message}");
+        assert!(message.contains("before_close"), "{message}");
+        assert!(
+            browser.calls().is_empty(),
+            "nothing was restored either: {:?}",
+            browser.calls()
+        );
+        assert!(!dir.exists(), "the folder was not made for nothing");
+    }
+
+    #[test]
+    fn a_session_that_is_only_restored_still_works_on_the_webdriver_host() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        put_session(&dir, &session_text(&chrome_cookies()["cookies"]));
+        let set = session_set(&dir, false);
+        let browser = RecordingBrowser::of(Engine::WebDriver, BrowserFamily::Chromium);
+
+        block_on(set.on_browser(&browser)).expect("restoring needs no hook at close");
+
+        assert_eq!(sent_cookies(&browser), [kept_cookies()]);
+    }
+
+    #[test]
     fn a_saved_session_comes_back_in_the_next_browser() {
         let fixtures = tempfile::tempdir().expect("temp dir");
         let dir = fixtures.path().join("sessions");

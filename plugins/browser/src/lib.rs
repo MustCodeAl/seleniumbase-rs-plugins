@@ -61,6 +61,10 @@
 //!   working directory unless `session_dir` says otherwise). They are put back
 //!   at launch, and with `save_on_close` written just before the browser
 //!   closes, through a file only its owner can read. localStorage is not kept.
+//!   `save_on_close` needs a host that runs `before_close`, which only the pure
+//!   CDP engine does (and only through `Browser::close`: a browser that is
+//!   dropped runs `on_close` alone); on the WebDriver host `on_browser` fails
+//!   naming the option, before anything is restored.
 //! - `interactive` (with `pause_message`) offers the task
 //!   `sbrs plugin run browser`: it opens a tab, waits for a person to sign in
 //!   by hand in the headed browser, and saves the session.
@@ -79,7 +83,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use seleniumbase_rs_plugin::{
-    BrowserHandle, Budgets, Capability, Category, Configurable, LaunchSettings, Metadata,
+    BrowserHandle, Budgets, Capability, Category, Configurable, Engine, LaunchSettings, Metadata,
     PathScope, Plugin, PluginError, Requirements, Result, Task, TaskContext, async_trait,
     config::options,
 };
@@ -318,7 +322,20 @@ impl Plugin for BrowserSession {
     /// Waits for the extensions' service workers when `wait_for_workers` is
     /// on, then puts the saved session back (`session`) and, when it will be
     /// saved, checks that its folder can be written.
+    ///
+    /// Fails first, naming `save_on_close`, when it is on and the engine does
+    /// not run `before_close` (the WebDriver host does not): the session would
+    /// be restored and never saved.
     async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
+        // Only the pure CDP engine runs `before_close`. Elsewhere the session
+        // would be restored and then never saved, so refuse before anything
+        // is read or written.
+        if self.config.save_on_close && browser.engine() != Engine::Cdp {
+            return Err(PluginError::other(
+                "browser: `save_on_close`: needs a host that runs `before_close` when the browser closes; the WebDriver host does not yet, so the cookies would never be saved. Use the pure CDP engine, or turn `save_on_close` off",
+            ));
+        }
+
         if self.config.wait_for_workers {
             let workers = self.workers().clone();
             workers::wait(

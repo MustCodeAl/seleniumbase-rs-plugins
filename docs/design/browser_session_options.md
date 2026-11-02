@@ -84,6 +84,10 @@ File: `<session_dir>/<session>.json`, `{"version": 1, "saved_at_ms": N, "cookies
 - With `save_on_close` the folder is made and tested for writing at launch, so a
   folder that cannot be written fails the launch and not the close (where an
   error is only logged).
+- `save_on_close` needs a host that runs `before_close` (see "What the host must
+  do"). On the WebDriver host `on_browser` fails with a message that names the
+  option, before the session is restored, instead of restoring it and never
+  saving it. A pure CDP browser dropped without `Browser::close` saves nothing.
 - Saving needs Unix file permissions: `save_on_close` and `interactive` are
   refused on other systems until ACLs are handled. Restoring works anywhere.
 
@@ -143,6 +147,16 @@ answers per capability, so it cannot say whether a core implements one method.
   `service_worker` whose URL starts with `chrome-extension://<id>/` for ids in
   `Browser::loaded_extensions`. Until then `wait_for_workers = true` fails at
   launch with a message naming the option.
+- A host that runs a plugin with `save_on_close` must call `Plugin::before_close`
+  while the browser still answers. The pure CDP engine does, in
+  `Browser::close`. The WebDriver host does not: its `close`
+  (`src/browser/plugin_hooks.rs`) calls `on_close` only, so there `on_browser`
+  fails naming `save_on_close`, before anything is restored, and the plugin
+  accepts only `Engine::Cdp` for the option. A pure CDP browser that is dropped
+  without `Browser::close` runs `on_close` only (`close_plugins_in_background`,
+  `src/sb_cdp/browser.rs`: the browser no longer answers), so it does not save
+  either; close it. Core follow-up: call `before_close` from the WebDriver quit
+  path, then the engine check in the plugin can go.
 - The rev pins of both crates in the core `Cargo.toml` move together.
 
 ## Not verified

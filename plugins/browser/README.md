@@ -68,7 +68,7 @@ starts.
 | `wait_for_workers` | `false` | wait, once the browser answers, until each extension of this plugin that has a `background.service_worker` has a running worker. Needs an extension |
 | `worker_timeout_secs` | `10` | how long that wait lasts, 1 to 30. Needs `wait_for_workers` |
 | `session` | none | the name of a saved session (1 to 64 letters, digits, `.`, `_`, `-`, starting with a letter or digit). Its cookies are put back when the browser starts |
-| `save_on_close` | `false` | save the browser's cookies under `session` just before it closes. Needs `session` |
+| `save_on_close` | `false` | save the browser's cookies under `session` just before it closes. Needs `session` and a host that runs `before_close` (the pure CDP engine; the WebDriver host fails the launch naming the option) |
 | `session_dir` | `saved_sessions` | the folder the session files live in, made absolute against the working directory when the plugin is built. Needs `session` |
 | `interactive` | `false` | offer the task `sbrs plugin run browser`, which waits for a person to sign in and saves the session. Needs `session` and a headed browser |
 | `pause_message` | a default text | what the person is told. Needs `interactive` |
@@ -117,6 +117,13 @@ the time.
   mode `0700`; a symbolic link or a folder at the file's place is refused. The
   folder is tested for writing at launch, so a folder that cannot be written
   fails the launch and not the close (where an error is only logged).
+- **`save_on_close` needs a host that runs `before_close`.** Only the pure CDP
+  engine does, in `Browser::close`. The WebDriver host calls `on_browser` and
+  `on_close` only, so there the launch fails in `on_browser` with a message that
+  names `save_on_close`, before the session is restored: the cookies would come
+  back and never be saved. A pure CDP browser that is dropped without
+  `Browser::close` runs `on_close` only and saves nothing, so close it. Without
+  `save_on_close` a session is restored on both engines.
 - Only the fields `name`, `value`, `domain`, `path`, `expires`, `httpOnly`,
   `secure`, `sameSite`, `priority`, `sourceScheme`, `sourcePort` and
   `partitionKey` are kept and sent; others in the file are dropped.

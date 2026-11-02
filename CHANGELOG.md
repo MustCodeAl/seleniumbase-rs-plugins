@@ -66,6 +66,10 @@ version; it stays 0.1.x until the next release.
     repeats a value has it removed). Saving is refused where there are no Unix
     file permissions. Capabilities: `cookies.write`, with saving `cookies.read`
     and `host.fs.write` for the folder, `host.fs.read` for the file.
+    `save_on_close` needs a host that runs `before_close`, which only the pure
+    CDP engine does: on the WebDriver host `on_browser` fails naming the option
+    before anything is restored, and a pure CDP browser dropped without
+    `Browser::close` saves nothing.
   - `interactive` and `pause_message`: `Plugin::task` returns the plugin only
     when `interactive` is on. `sbrs plugin run browser --headed --input
     login.json` opens a tab (`url` of the input, `http` or `https` only), waits on
