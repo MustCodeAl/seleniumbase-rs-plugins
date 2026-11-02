@@ -10,11 +10,16 @@ use seleniumbase_rs_plugin::{
     LaunchSettings, Metadata, PathScope, Plugin, PluginError, PluginSet, PluginSpec, Registry,
     Requirements, async_trait,
 };
-use seleniumbase_rs_plugin::{BrowserHandle, CapabilitySet, ExtensionWorker, LoadedExtension};
+use seleniumbase_rs_plugin::{
+    BrowserHandle, CapabilitySet, Clock, ExtensionWorker, LoadedExtension, NoPrompt, PageHandle,
+    Prompt, TaskContext,
+};
 use seleniumbase_rs_plugin_browser::{BrowserSession, SessionConfig};
 use seleniumbase_rs_plugin_crx::CrxExtensions;
 use seleniumbase_rs_plugin_testing::block_on;
-use seleniumbase_rs_plugin_testing::{Call, ManualTimer, RecordingBrowser, block_on_advancing};
+use seleniumbase_rs_plugin_testing::{
+    Call, ManualTimer, RecordingBrowser, VecSink, block_on_advancing,
+};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
@@ -1990,6 +1995,394 @@ mod sessions {
             here.join("kept").join("login.json"),
         ]));
         assert!(meta.capabilities.covers(&expected), "{meta:?}");
+    }
+    // ---- interactive: sign in by hand, keep the session ----
+
+    /// A prompt that writes down what it was told and what the browser had been
+    /// asked by then, and either returns or refuses to wait.
+    struct ScriptedPrompt {
+        browser: Arc<RecordingBrowser>,
+        told: std::sync::Mutex<Vec<(String, Vec<Call>)>>,
+        refuses: bool,
+    }
+
+    impl ScriptedPrompt {
+        fn new(browser: &Arc<RecordingBrowser>, refuses: bool) -> Self {
+            Self {
+                browser: Arc::clone(browser),
+                told: std::sync::Mutex::default(),
+                refuses,
+            }
+        }
+
+        fn told(&self) -> Vec<(String, Vec<Call>)> {
+            self.told.lock().expect("not poisoned").clone()
+        }
+    }
+
+    #[async_trait]
+    impl Prompt for ScriptedPrompt {
+        async fn wait(
+            &self,
+            message: &str,
+            _page: &dyn PageHandle,
+        ) -> seleniumbase_rs_plugin::Result<()> {
+            self.told
+                .lock()
+                .expect("not poisoned")
+                .push((message.to_owned(), self.browser.calls()));
+            if self.refuses {
+                Err(PluginError::unsupported("waiting for a person"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// A browser that can open tabs and knows the cookies of [`chrome_cookies`].
+    fn signed_in_browser() -> Arc<RecordingBrowser> {
+        Arc::new(
+            RecordingBrowser::new()
+                .with_contexts()
+                .replying("Storage.getCookies", chrome_cookies()),
+        )
+    }
+
+    /// A set around an interactive plugin for the session `login` kept in `dir`.
+    fn interactive_set(dir: &Path, message: Option<&str>) -> PluginSet {
+        let mut config = SessionConfig::new()
+            .with_session("login")
+            .with_session_dir(dir)
+            .with_interactive(true);
+        if let Some(message) = message {
+            config = config.with_pause_message(message);
+        }
+        let set = PluginSet::strict()
+            .with(plugin(config))
+            .expect("a strict set takes it");
+        set.check(&context(false))
+            .expect("a headed browser, and the grants cover the options");
+        set
+    }
+
+    /// Runs the task of the `browser` plugin.
+    fn run_task(
+        set: &PluginSet,
+        browser: &RecordingBrowser,
+        input: &Value,
+        prompt: &dyn Prompt,
+        sink: &VecSink,
+    ) -> Result<Value, PluginError> {
+        let clock = Clock::new(Arc::new(ManualTimer::new()));
+        let cx = TaskContext::new(browser, input, sink, set, &clock, prompt);
+        block_on(set.task("browser").expect("the task").run(&cx))
+    }
+
+    #[test]
+    fn the_task_opens_a_tab_asks_a_person_and_saves_the_session() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let set = interactive_set(&dir, None);
+        let browser = signed_in_browser();
+        let prompt = ScriptedPrompt::new(&browser, false);
+        let sink = VecSink::new();
+        let url = "https://app.test/login";
+
+        let summary = run_task(&set, &browser, &json!({ "url": url }), &prompt, &sink)
+            .expect("the person signs in");
+
+        assert_eq!(summary, json!({ "session": "login", "cookies": 3 }));
+        assert_eq!(sink.lines(), [summary.clone()]);
+        assert!(!summary.to_string().contains(CANARY));
+        let told = prompt.told();
+        assert_eq!(told.len(), 1);
+        assert_eq!(
+            told[0].0,
+            "Sign in in the browser window, then come back here."
+        );
+        assert_eq!(
+            told[0].1,
+            [Call::NewPage(Some(url.into()))],
+            "the tab was open and nothing was saved yet when the person was asked"
+        );
+        assert_eq!(
+            browser.calls(),
+            [
+                Call::NewPage(Some(url.into())),
+                Call::Send("Storage.getCookies".into(), json!({})),
+            ]
+        );
+        let file = dir.join("login.json");
+        let saved: Value =
+            serde_json::from_slice(&std::fs::read(&file).expect("the file")).expect("JSON");
+        assert_eq!(saved["cookies"], kept_cookies());
+        assert_eq!(
+            std::fs::metadata(&file)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(browser.live_pages(), 1, "the tab is left open for the host");
+    }
+
+    #[test]
+    fn the_message_is_the_one_given_and_no_address_means_a_blank_tab() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let set = interactive_set(&dir, Some("Sign in to the test app"));
+        for input in [Value::Null, json!({})] {
+            let browser = signed_in_browser();
+            let prompt = ScriptedPrompt::new(&browser, false);
+            run_task(&set, &browser, &input, &prompt, &VecSink::new()).expect("the task runs");
+            assert_eq!(prompt.told()[0].0, "Sign in to the test app");
+            assert_eq!(prompt.told()[0].1, [Call::NewPage(None)]);
+        }
+    }
+
+    #[test]
+    fn only_http_and_https_addresses_are_opened() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let set = interactive_set(&dir, None);
+        for input in [
+            json!({ "url": "file:///etc/passwd" }),
+            json!({ "url": "javascript:alert(1)" }),
+            json!({ "url": "ftp://files.test/" }),
+            json!({ "url": "about:blank" }),
+            json!({ "url": "https://a b.test/" }),
+            json!({ "url": "https://" }),
+            json!({ "url": "" }),
+            json!({ "url": 5 }),
+            json!("https://a.test/"),
+            json!(5),
+        ] {
+            let browser = signed_in_browser();
+            let prompt = ScriptedPrompt::new(&browser, false);
+            let error = run_task(&set, &browser, &input, &prompt, &VecSink::new())
+                .expect_err("a bad address or input");
+            assert!(
+                error.to_string().contains("`interactive`"),
+                "{input}: {error}"
+            );
+            assert!(browser.calls().is_empty(), "no tab for {input}");
+            assert!(prompt.told().is_empty());
+        }
+        for url in ["http://a.test/", "HTTPS://A.TEST/x?y=1#z"] {
+            let browser = signed_in_browser();
+            let prompt = ScriptedPrompt::new(&browser, false);
+            run_task(
+                &set,
+                &browser,
+                &json!({ "url": url }),
+                &prompt,
+                &VecSink::new(),
+            )
+            .unwrap_or_else(|error| panic!("{url}: {error}"));
+        }
+    }
+
+    #[test]
+    fn without_a_person_the_task_fails_clearly_and_saves_nothing() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let set = interactive_set(&dir, None);
+        let browser = signed_in_browser();
+
+        // The host has no prompt at all (`NoPrompt`), or one that refuses.
+        let error = run_task(&set, &browser, &Value::Null, &NoPrompt, &VecSink::new())
+            .expect_err("nobody to ask");
+        let text = error.to_string();
+        assert!(
+            text.contains("`interactive` needs a person at the keyboard"),
+            "{text}"
+        );
+        let refusing = ScriptedPrompt::new(&browser, true);
+        let error = run_task(&set, &browser, &Value::Null, &refusing, &VecSink::new())
+            .expect_err("the prompt refuses");
+        assert!(
+            error
+                .to_string()
+                .contains("`interactive` needs a person at the keyboard"),
+            "{error}"
+        );
+        assert!(
+            !dir.join("login.json").exists(),
+            "nothing is saved without a sign-in"
+        );
+        assert!(
+            !browser.calls().iter().any(
+                |call| matches!(call, Call::Send(method, _) if method == "Storage.getCookies")
+            ),
+            "{:?}",
+            browser.calls()
+        );
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_written_is_found_out_before_the_person_is_asked() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let locked = fixtures.path().join("locked");
+        std::fs::create_dir(&locked).expect("make the folder");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500)).expect("lock");
+        let dir = locked.join("sessions");
+        if std::fs::create_dir(&dir).is_ok() {
+            // A process that may write there anyway (root) cannot show the failure.
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
+                .expect("unlock");
+            return;
+        }
+        let set = interactive_set(&dir, None);
+        let browser = signed_in_browser();
+        let prompt = ScriptedPrompt::new(&browser, false);
+        let error = run_task(&set, &browser, &Value::Null, &prompt, &VecSink::new())
+            .expect_err("not writable");
+        assert!(error.to_string().contains("`session`"), "{error}");
+        assert!(
+            prompt.told().is_empty(),
+            "nobody was asked to sign in for nothing"
+        );
+        assert!(browser.calls().is_empty());
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).expect("unlock");
+    }
+
+    #[test]
+    fn the_task_exists_only_when_interactive_is_on() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let quiet = PluginSet::strict()
+            .with(plugin(
+                SessionConfig::new()
+                    .with_session("login")
+                    .with_session_dir(&dir),
+            ))
+            .expect("a strict set takes it");
+        assert!(quiet.task_names().is_empty());
+        assert!(quiet.task("browser").is_err());
+        assert!(plugin(SessionConfig::new()).task().is_none());
+
+        let set = interactive_set(&dir, None);
+        assert_eq!(set.task_names(), ["browser"]);
+    }
+
+    #[test]
+    fn interactive_needs_a_headed_browser_and_a_host_with_tasks() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let interactive = plugin(
+            SessionConfig::new()
+                .with_session("login")
+                .with_session_dir(&dir)
+                .with_interactive(true),
+        );
+        assert!(interactive.requirements().contains(Requirements::HEADFUL));
+        assert!(
+            interactive
+                .requirements()
+                .contains(Requirements::CHROMIUM_ONLY)
+        );
+        assert!(
+            interactive
+                .requirements()
+                .contains(Requirements::LAUNCH_ONLY)
+        );
+        assert!(
+            !plugin(SessionConfig::new().with_session("login"))
+                .requirements()
+                .contains(Requirements::HEADFUL)
+        );
+
+        let set = PluginSet::strict()
+            .with(interactive)
+            .expect("a strict set takes it");
+        set.check(&context(false))
+            .expect("a window, the CDP engine");
+        let error = set.check(&context(true)).expect_err("headless");
+        assert!(
+            matches!(error, PluginError::Requirement { .. }),
+            "{error:?}"
+        );
+        let error = set
+            .check_with(
+                &context(false),
+                &HostInfo::webdriver(BrowserFamily::Chromium),
+            )
+            .expect_err("the WebDriver host has no tasks");
+        assert!(
+            matches!(&error, PluginError::Unsupported { capability, .. } if capability == "task"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn the_interactive_instance_declares_the_task_and_cookie_access() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let base = || {
+            SessionConfig::new()
+                .with_session("login")
+                .with_session_dir(&dir)
+        };
+        let plain = plugin(base()).metadata();
+        assert!(!plain.capabilities.covers(&Capability::Task));
+
+        let meta = plugin(base().with_interactive(true)).metadata();
+        for capability in [
+            Capability::Task,
+            Capability::CookiesRead,
+            Capability::CookiesWrite,
+        ] {
+            assert!(meta.capabilities.covers(&capability), "{capability}");
+        }
+        assert!(meta.optional.covers(&Capability::PageNavigate));
+        assert!(
+            meta.capabilities
+                .covers(&Capability::HostFsWrite(PathScope::Declared(vec![
+                    dir.clone()
+                ])))
+        );
+
+        // What `sbrs plugin info browser` lists is what an instance may add.
+        let described = BrowserSession::describe();
+        for capability in [
+            Capability::CookiesRead,
+            Capability::CookiesWrite,
+            Capability::Clock,
+            Capability::Task,
+            Capability::PageNavigate,
+        ] {
+            assert!(described.optional.covers(&capability), "{capability}");
+        }
+    }
+
+    #[test]
+    fn a_set_that_withholds_the_task_refuses_interactive_at_start_up() {
+        let fixtures = tempfile::tempdir().expect("temp dir");
+        let dir = fixtures.path().join("sessions");
+        let interactive = plugin(
+            SessionConfig::new()
+                .with_session("login")
+                .with_session_dir(&dir)
+                .with_interactive(true),
+        );
+        let grants: CapabilitySet = interactive
+            .metadata()
+            .capabilities
+            .iter()
+            .filter(|capability| **capability != Capability::Task)
+            .cloned()
+            .collect();
+        let set = PluginSet::strict()
+            .with_grants(interactive, grants)
+            .expect("a strict set takes it");
+        let error = set.check(&context(false)).expect_err("task is not granted");
+        assert!(
+            matches!(&error, PluginError::Capability { capability, .. } if capability == "task"),
+            "{error:?}"
+        );
     }
 } // mod sessions
 

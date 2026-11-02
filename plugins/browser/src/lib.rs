@@ -53,6 +53,7 @@
 //! options instead of being accepted and ignored.
 
 mod config;
+mod interactive;
 mod session;
 
 mod source;
@@ -63,8 +64,10 @@ use std::time::Duration;
 
 use seleniumbase_rs_plugin::{
     BrowserHandle, Budgets, Capability, Category, Configurable, LaunchSettings, Metadata,
-    PathScope, Plugin, PluginError, Requirements, Result, async_trait, config::options,
+    PathScope, Plugin, PluginError, Requirements, Result, Task, TaskContext, async_trait,
+    config::options,
 };
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 pub use config::SessionConfig;
@@ -166,6 +169,38 @@ impl Configurable for BrowserSession {
     }
 }
 
+/// The `interactive` task, started by `sbrs plugin run browser`: a person signs
+/// in by hand, in the headed browser, and the cookies are kept as the session.
+#[async_trait]
+impl Task for BrowserSession {
+    async fn run(&self, cx: &TaskContext<'_>) -> Result<Value> {
+        let Some(store) = &self.store else {
+            // `interactive` without `session` does not pass the check.
+            return Err(PluginError::other("browser: `interactive` needs `session`"));
+        };
+        let url = interactive::start_url(cx.input)?;
+        // A folder that cannot be written is found out now, not after a person
+        // has signed in.
+        store.check_writable()?;
+        let browser = cx.plugins.guarded_browser(NAME, cx.browser)?;
+        let page = browser.new_page(url).await?;
+        cx.prompt
+            .wait(self.config.pause_message_or_default(), &*page)
+            .await
+            .map_err(|error| {
+                PluginError::other(format!(
+                    "browser: `interactive` needs a person at the keyboard: {error}"
+                ))
+            })?;
+        // The tab stays open: closing the last tab of a headed Chrome can end
+        // the browser, and the host closes it right after the task.
+        let cookies = session::save(&browser, store).await?;
+        let summary = json!({ "session": store.name(), "cookies": cookies });
+        cx.sink.record(&summary)?;
+        Ok(summary)
+    }
+}
+
 /// Whether `args` ask for Chrome's old headless mode.
 fn asks_for_old_headless(args: &[String]) -> bool {
     args.iter()
@@ -179,7 +214,13 @@ impl Plugin for BrowserSession {
     }
 
     fn requirements(&self) -> Requirements {
-        Requirements::CHROMIUM_ONLY | Requirements::LAUNCH_ONLY
+        let needs = Requirements::CHROMIUM_ONLY | Requirements::LAUNCH_ONLY;
+        // A person signs in, so there must be a window for them.
+        if self.config.interactive {
+            needs | Requirements::HEADFUL
+        } else {
+            needs
+        }
     }
 
     /// The capabilities this instance needs: the declared ones, the temporary
@@ -210,7 +251,18 @@ impl Plugin for BrowserSession {
                 .capability(Capability::Clock)
                 .budget(wait_budgets(self.config.worker_timeout_secs_or_default()));
         }
+        if self.config.interactive {
+            // The task opens a tab, at an address when the input has one.
+            meta = meta
+                .capability(Capability::Task)
+                .optional(Capability::PageNavigate);
+        }
         meta
+    }
+
+    /// The task that waits for a person to sign in, when `interactive` is on.
+    fn task(&self) -> Option<&dyn Task> {
+        self.config.interactive.then_some(self as &dyn Task)
     }
 
     /// A fresh instance for each browser, so closing one pooled browser does
