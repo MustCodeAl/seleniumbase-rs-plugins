@@ -30,9 +30,9 @@ use std::ops::Deref;
 use serde_json::{Value, json};
 
 use crate::{
-    BrowserFamily, BrowserHandle, Capability, ContextHandle, ContextId, ContextSettings, Engine,
-    Entry, LoadedExtension, PageHandle, PageId, PluginError, PluginSet, RawKind, Result, Seals,
-    async_trait,
+    BrowserFamily, BrowserHandle, Capability, Clock, ContextHandle, ContextId, ContextSettings,
+    Engine, Entry, ExtensionWorker, LoadedExtension, PageHandle, PageId, PluginError, PluginSet,
+    RawKind, Result, Seals, async_trait,
 };
 
 /// What a protocol command needs, and which commands the host keeps for itself.
@@ -507,6 +507,29 @@ impl<H: BrowserHandle + ?Sized> BrowserHandle for Guarded<'_, H> {
 
     fn extensions(&self) -> Vec<LoadedExtension> {
         self.inner.extensions()
+    }
+
+    async fn extension_workers(&self) -> Result<Vec<ExtensionWorker>> {
+        if !self
+            .rules
+            .entry
+            .grants
+            .covers(&Capability::LaunchExtensions)
+        {
+            return Err(self
+                .rules
+                .denied(Capability::LaunchExtensions, "`extension_workers` needs it"));
+        }
+        self.inner.extension_workers().await
+    }
+
+    /// The set's clock, or the host handle's own when the set has no timer, and
+    /// only for a plugin that holds [`Capability::Clock`].
+    fn clock(&self) -> Option<Clock> {
+        if !self.rules.entry.grants.covers(&Capability::Clock) {
+            return None;
+        }
+        self.rules.set.clock().or_else(|| self.inner.clock())
     }
 
     async fn new_context<'b>(

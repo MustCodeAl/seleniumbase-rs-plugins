@@ -120,6 +120,29 @@ impl LoadedExtension {
     }
 }
 
+/// A running service worker of an extension the browser loaded, as the host
+/// reports it. See [`BrowserHandle::extension_workers`](crate::BrowserHandle::extension_workers).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ExtensionWorker {
+    /// The id of the extension the worker belongs to.
+    pub id: String,
+    /// The address of the worker's script, such as
+    /// `chrome-extension://<id>/background.js`.
+    pub url: String,
+}
+
+impl ExtensionWorker {
+    /// A worker of the extension `id` whose script is at `url`.
+    #[must_use]
+    pub fn new(id: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            url: url.into(),
+        }
+    }
+}
+
 /// A browser context, as a plugin sees it. Always borrowed: a plugin cannot
 /// keep one.
 #[async_trait]

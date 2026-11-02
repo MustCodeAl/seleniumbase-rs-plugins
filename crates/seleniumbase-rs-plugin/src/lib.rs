@@ -150,7 +150,9 @@ pub use capability::{
     RawKind, Risk,
 };
 pub use config::{Configurable, Descriptor, PluginSpec, Registry};
-pub use context::{BrowserId, ContextHandle, ContextId, ContextSettings, LoadedExtension, PageId};
+pub use context::{
+    BrowserId, ContextHandle, ContextId, ContextSettings, ExtensionWorker, LoadedExtension, PageId,
+};
 
 pub use guard::{Guarded, cdp_policy};
 pub use host::{HostInfo, HostKind};
@@ -601,6 +603,28 @@ pub trait BrowserHandle: Send + Sync {
     /// The extensions the browser loaded, with the ids it gave them.
     fn extensions(&self) -> Vec<LoadedExtension> {
         Vec::new()
+    }
+
+    /// The service workers of the extensions this browser loaded that are
+    /// running now: one entry per worker, so an extension whose worker has not
+    /// started (or has stopped) has none. Call it again to see a later state.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::NotSupported`] unless the host can list them, which is
+    /// the default. [`Guarded`] also refuses a plugin that does not hold
+    /// [`Capability::LaunchExtensions`].
+    async fn extension_workers(&self) -> Result<Vec<ExtensionWorker>> {
+        Err(PluginError::unsupported("extension_workers"))
+    }
+
+    /// A clock for sleeping and time limits inside a hook, such as
+    /// [`Plugin::on_browser`], which gets no [`TaskContext`]. `None` when the
+    /// host has none. [`Guarded`] gives it only to a plugin that holds
+    /// [`Capability::Clock`], and it is the clock of the plugin set
+    /// ([`PluginSet::with_timer`]) when the set has a timer.
+    fn clock(&self) -> Option<Clock> {
+        None
     }
 
     /// Makes a browser context. The handle is borrowed: a plugin cannot keep it.
