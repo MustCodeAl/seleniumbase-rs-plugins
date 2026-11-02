@@ -2093,7 +2093,7 @@ mod sessions {
             .expect("the person signs in");
 
         assert_eq!(summary, json!({ "session": "login", "cookies": 3 }));
-        assert_eq!(sink.lines(), [summary.clone()]);
+        assert_eq!(sink.lines(), std::slice::from_ref(&summary));
         assert!(!summary.to_string().contains(CANARY));
         let told = prompt.told();
         assert_eq!(told.len(), 1);

@@ -6,7 +6,7 @@
 
 use std::fmt;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -319,6 +319,7 @@ fn create_private_dir(_dir: &Path) -> io::Result<()> {
 /// Writes a new file that only its owner can read, failing if `path` exists.
 #[cfg(unix)]
 fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = fs::OpenOptions::new()
         .write(true)
