@@ -1,0 +1,50 @@
+# cargo-deny configuration — supply-chain gate for seleniumbase-rs-plugins.
+#
+# Modelled on the deny.toml of the core repository (seleniumbase-rs). Run locally with
+# `cargo deny --workspace check`, which covers every crate of the workspace (the plugin API,
+# its test kit, the aggregator and the ten plugins). Every exception below has to be written
+# down and reviewed rather than silently tolerated.
+
+[graph]
+all-features = true
+
+[advisories]
+# Each ignore needs a rationale and, where the fix is upstream, a pointer to what we are
+# waiting on.
+ignore = [
+    # RUSTSEC-2026-0441: pin-utils unmaintained (its `pin_mut!` is `std::pin::pin!` now).
+    # Reached only through seleniumbase-rs-plugin-imap -> async-imap 0.12.0 (the newest
+    # release on crates.io, 2026-09-30). It is a few lines of macro with no unsafe input
+    # handling. Drop this once async-imap moves off it.
+    "RUSTSEC-2026-0441",
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+# "warn", where the core repository has "deny": the plugin crates are not `publish = false`
+# and every one of them depends on `seleniumbase-rs-plugin` by path with no `version`
+# (13 crates; the aggregator's own path dependencies do carry `version = "0.1"`). crates.io
+# does not accept that, so cargo-deny reports them as wildcard dependencies. That is a real
+# finding for the publish lane (docs/design/dependency_review.md in the core repository) and
+# not a reason to fail every run. Make it "deny" once the manifests carry versions.
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Every dependency comes from crates.io or from this workspace; no git source is allowed.
+allow-git = []
