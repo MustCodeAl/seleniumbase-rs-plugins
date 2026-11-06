@@ -22,6 +22,9 @@ workflow:
   auto_cancel:
     on_new_commit: interruptible
   rules:
+    # A lane with an open merge request gets the merge request pipeline only, not a second one for the push.
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: '$CI_COMMIT_BRANCH =~ /^(lane|batch)\//'
