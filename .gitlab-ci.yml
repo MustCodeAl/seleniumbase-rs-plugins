@@ -1,0 +1,130 @@
+# GitLab CI for seleniumbase-rs-plugins, modelled on the one of seleniumbase-rs (core).
+#
+# The repository is mirrored to GitLab.com after each gated publish; CI runs on GitLab's shared
+# Linux runners (2 vCPUs, 8 GB). The groups are on the Open Source plan. Pipelines are created
+# for merge requests, for the default branch (`main`) and for `lane/*` and `batch/*` branches, so
+# a lane is gated on GitLab before main moves to it. A new push cancels a pipeline that is still
+# running (every job is `interruptible`).
+#
+#   gate          fmt and clippy with `-D warnings`
+#   test          the test suite of every crate (the tests that start a real Chrome or a
+#                 real mail server are `#[ignore]`d and do not run)
+#   supply-chain  cargo deny and cargo audit
+#
+# A pipeline made by hand (Build > Pipelines > New pipeline) holds every job as a manual job.
+# To push a commit that needs no pipeline, put `[ci skip]` in its message.
+#
+# No job needs a secret, and none prints one: there is no `set -x`, no `env` and no token here.
+#
+# The Rust version is `rust-version` of Cargo.toml. When it moves, move RUST_VERSION below.
+
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    # A lane with an open merge request gets the merge request pipeline only, not a second one for the push.
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: '$CI_COMMIT_BRANCH =~ /^(lane|batch)\//'
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+default:
+  interruptible: true
+  retry:
+    max: 1
+    when: runner_system_failure
+
+variables:
+  RUST_VERSION: "1.99"
+  # Two build jobs fit the 2 vCPUs and 8 GB of the runner.
+  CARGO_BUILD_JOBS: "2"
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_TERM_COLOR: always
+  # A GitLab cache can only hold paths inside the project folder, so cargo keeps its registry there.
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+
+.rules_automatic:
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  - if: '$CI_COMMIT_BRANCH =~ /^(lane|batch)\//'
+  - if: $CI_PIPELINE_SOURCE == "web"
+    when: manual
+    allow_failure: true
+
+.rust:
+  image: rust:${RUST_VERSION}-bookworm
+
+# The cargo registry and the build folder, keyed by Cargo.lock. Saved even when the job fails: a
+# failed test run still built every dependency. Test executables are linked again on the next run,
+# so they are dropped before the upload.
+.target_cache:
+  cache:
+    key:
+      prefix: rust-target
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo/registry/index/
+      - .cargo/registry/cache/
+      - .cargo/git/db/
+      - target/
+    when: always
+  after_script:
+    - |
+      [ -d target/debug ] || exit 0
+      rm -rf target/doc target/debug/incremental target/debug/examples target/tmp
+      find target/debug -maxdepth 1 -type f -delete
+      find target/debug/deps -type f -perm /111 ! -name '*.so' -delete
+
+gate:
+  extends:
+    - .rust
+    - .target_cache
+  rules:
+    - !reference [.rules_automatic]
+  timeout: 1h
+  script:
+    - rustc --version
+    - cargo --version
+    - rustup component add rustfmt clippy
+    - cargo fmt --all -- --check
+    - cargo clippy --workspace --all-targets -- -D warnings
+
+test:
+  extends:
+    - .rust
+    - .target_cache
+  rules:
+    - !reference [.rules_automatic]
+  timeout: 1h
+  script:
+    - cargo test --workspace --no-fail-fast
+
+# `cargo deny --workspace check` covers every crate (the plugin API, its test kit, the aggregator
+# and the plugins). The tools are built from source the first time and kept in the cache.
+supply-chain:
+  extends: .rust
+  rules:
+    - !reference [.rules_automatic]
+  cache:
+    key:
+      prefix: supply-chain
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo/bin/
+      - .cargo/.crates.toml
+      - .cargo/.crates2.json
+      - .cargo/registry/index/
+      - .cargo/registry/cache/
+      - .cargo/git/db/
+    when: always
+  script:
+    - export PATH="$CARGO_HOME/bin:$PATH"
+    - cargo install --locked --version '^0.20' cargo-deny
+    - cargo install --locked cargo-audit
+    - cargo deny --all-features --workspace check
+    - cargo audit
