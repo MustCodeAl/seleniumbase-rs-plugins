@@ -1,2 +1,5 @@
 target/
 .DS_Store
+# GitLab CI's cache folders: mise (MISE_DATA_DIR) and the supply-chain job's cargo-audit
+/.mise/
+/.cargo-audit/
