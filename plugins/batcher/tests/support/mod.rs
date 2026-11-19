@@ -213,7 +213,7 @@ pub struct Rig {
 
 impl Rig {
     pub fn new() -> Self {
-        Self::with_browser(RecordingBrowser::new().with_contexts())
+        Self::with_browser(RecordingBrowser::builder().contexts().build())
     }
 
     pub fn with_browser(browser: RecordingBrowser) -> Self {

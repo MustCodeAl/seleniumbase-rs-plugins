@@ -345,8 +345,7 @@ fn a_browser_that_cannot_make_a_context_fails_the_run_before_any_job() {
     let worker = Worker::new("worker", Mode::Echo);
     let set = set_with(json!({ "runner": "worker" }), &[&worker]);
     let rig = Rig::with_browser(
-        RecordingBrowser::new()
-            .with_contexts()
+        RecordingBrowser::builder().contexts().build()
             .failing("new_context"),
     );
     let error = rig.run(&set, &jobs(3, 0)).unwrap_err();

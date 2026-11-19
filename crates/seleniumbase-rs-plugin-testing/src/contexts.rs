@@ -1,6 +1,6 @@
 //! Fake browser contexts and tabs that count how many of them are alive.
 //!
-//! [`RecordingBrowser::with_contexts`] turns on `new_context` and `new_page`.
+//! [`RecordingBrowserBuilder::contexts`] turns on `new_context` and `new_page`.
 //! Contexts and tabs the plugin opens are fakes that write down what happens to
 //! them, and the browser counts how many are open at once, so a test can check
 //! that a plugin keeps to its concurrency limit and closes what it opens.
@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use seleniumbase_rs_plugin::{
-    ContextHandle, ContextId, ContextSettings, Engine, LoadedExtension, PageHandle, PageId,
+    ContextHandle, ContextId, ContextSettings, Engine, PageHandle, PageId,
     PluginError, Result, async_trait,
 };
 use serde_json::Value;
@@ -112,9 +112,7 @@ impl ContextHandle for FakeContext {
         self.recorder.answer("new_page")?;
         let serial = self.world.open_page();
         self.open_pages.fetch_add(1, Ordering::SeqCst);
-        let page = RecordingPage::new()
-            .with_id(PageId::new(format!("{}-page-{serial}", self.id)))
-            .in_context(self.id.clone());
+        let page = RecordingPage::builder().id(PageId::new(format!("{}-page-{serial}", self.id))).build().in_context(self.id.clone());
         self.pages
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -213,13 +211,6 @@ impl PageHandle for CountedPage {
 }
 
 impl RecordingBrowser {
-    /// Lets plugins open contexts and tabs (`BrowserHandle::new_context` and
-    /// `BrowserHandle::new_page`) and counts them.
-    #[must_use]
-    pub fn with_contexts(mut self) -> Self {
-        self.world = Some(Arc::new(World::default()));
-        self
-    }
 
     /// Makes `method` (`"new_context"`, `"new_page"`, `"dispose"`, `"extension_workers"` or a protocol
     /// command) answer with an error.
@@ -230,13 +221,6 @@ impl RecordingBrowser {
             .failing
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(method.to_owned());
-        self
-    }
-
-    /// Sets the extensions `BrowserHandle::extensions` reports.
-    #[must_use]
-    pub fn with_extensions(mut self, extensions: Vec<LoadedExtension>) -> Self {
-        self.extensions = extensions;
         self
     }
 
@@ -334,7 +318,7 @@ impl RecordingBrowser {
             .as_ref()
             .ok_or_else(|| PluginError::unsupported("new_page"))?;
         let serial = world.open_page();
-        let page = RecordingPage::new().with_id(PageId::new(format!("page-{serial}")));
+        let page = RecordingPage::builder().id(PageId::new(format!("page-{serial}"))).build();
         self.made_pages
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

@@ -24,8 +24,8 @@ version; it stays 0.1.x until the next release.
   the plugin that needs it fail at its first use, naming the option. The core
   has to implement `extension_workers` (see the notes of the `browser` plugin).
   A version bump is the owner's call.
-- `seleniumbase-rs-plugin-testing`: `RecordingBrowser::{with_workers,
-  with_clock, replying}` (a script of `extension_workers` snapshots, one per call
+- `seleniumbase-rs-plugin-testing`: `RecordingBrowserBuilder::{workers,
+  clock}` and `RecordingBrowser::replying` (a script of `extension_workers` snapshots, one per call
   with the last repeating; a clock; canned answers to browser-level commands),
   `failing("extension_workers")`, `Call::ExtensionWorkers`, and
   `block_on_advancing(&ManualTimer, step, future)`, which moves the timer on
@@ -281,8 +281,8 @@ version; it stays 0.1.x until the next release.
   compiles and behaves as before (`tests/legacy.rs`).
 - `seleniumbase-rs-plugin-testing` 0.1.3: `Call::{Navigate, Url, Close,
   BlockUrls, NewContext, NewPage, Dispose}`, `RecordingPage::{evaluating, at,
-  with_id, in_context}` (clonable), `RecordingBrowser::{with_contexts, failing,
-  with_extensions}` with live and peak counts of contexts and tabs and
+  in_context}` and `RecordingPageBuilder::id` (clonable), `RecordingBrowser::failing` and
+  `RecordingBrowserBuilder::{contexts, extensions}` with live and peak counts of contexts and tabs and
   `FakeContext`, `ManualTimer`, `drive_request`, `drive_response` and `VecSink`.
 - `seleniumbase-rs-plugin` 0.1.3: a plugin cannot take the host down. A panic
   in any hook is caught and becomes `PluginError::Panicked { plugin, hook }`

@@ -145,6 +145,39 @@ impl Default for RecordingPage {
     }
 }
 
+/// Builds a [`RecordingPage`]. [`RecordingPage::builder`] starts from
+/// [`RecordingPage::new`]; [`RecordingPage::into_builder`] starts from a page
+/// that already exists. `evaluating`, `at`, `in_context`, `failing` and
+/// `replying` stay on the page.
+#[must_use = "a builder does nothing until `build` is called"]
+#[derive(Debug)]
+pub struct RecordingPageBuilder {
+    page: RecordingPage,
+}
+
+impl Default for RecordingPageBuilder {
+    fn default() -> Self {
+        Self {
+            page: RecordingPage::new(),
+        }
+    }
+}
+
+impl RecordingPageBuilder {
+    /// Sets the id [`PageHandle::id`] answers with.
+    #[must_use]
+    pub fn id(mut self, id: PageId) -> Self {
+        self.page.id = id;
+        self
+    }
+
+    /// The page.
+    #[must_use]
+    pub fn build(self) -> RecordingPage {
+        self.page
+    }
+}
+
 impl RecordingPage {
     /// A fake tab of the pure CDP engine.
     #[must_use]
@@ -186,11 +219,16 @@ impl RecordingPage {
         self
     }
 
-    /// Sets the id [`PageHandle::id`] answers with.
+    /// A builder that starts from [`new`](Self::new).
     #[must_use]
-    pub fn with_id(mut self, id: PageId) -> Self {
-        self.id = id;
-        self
+    pub fn builder() -> RecordingPageBuilder {
+        RecordingPageBuilder::default()
+    }
+
+    /// A builder that starts from this page.
+    #[must_use]
+    pub fn into_builder(self) -> RecordingPageBuilder {
+        RecordingPageBuilder { page: self }
     }
 
     /// Puts the tab in a context, which [`PageHandle::context`] reports.
@@ -332,6 +370,67 @@ impl Default for RecordingBrowser {
     }
 }
 
+/// Builds a [`RecordingBrowser`]. [`RecordingBrowser::builder`] starts from
+/// [`RecordingBrowser::new`]; [`RecordingBrowser::into_builder`] starts from a
+/// browser that already exists. `failing` and `replying` stay on the browser.
+#[must_use = "a builder does nothing until `build` is called"]
+#[derive(Debug)]
+pub struct RecordingBrowserBuilder {
+    browser: RecordingBrowser,
+}
+
+impl Default for RecordingBrowserBuilder {
+    fn default() -> Self {
+        Self {
+            browser: RecordingBrowser::new(),
+        }
+    }
+}
+
+impl RecordingBrowserBuilder {
+    /// Lets plugins open contexts and tabs (`BrowserHandle::new_context` and
+    /// `BrowserHandle::new_page`) and counts them.
+    #[must_use]
+    pub fn contexts(mut self) -> Self {
+        self.browser.world = Some(Arc::new(contexts::World::default()));
+        self
+    }
+
+    /// Sets the extensions `BrowserHandle::extensions` reports.
+    #[must_use]
+    pub fn extensions(mut self, extensions: Vec<LoadedExtension>) -> Self {
+        self.browser.extensions = extensions;
+        self
+    }
+
+    /// Scripts [`BrowserHandle::extension_workers`]: the first call answers
+    /// with the first snapshot, the second with the second, and the last one
+    /// repeats. Without a script the call answers
+    /// [`PluginError::NotSupported`], as a host without the query does.
+    #[must_use]
+    pub fn workers(mut self, snapshots: Vec<Vec<ExtensionWorker>>) -> Self {
+        self.browser.workers = Mutex::new(WorkerScript {
+            snapshots,
+            next: 0,
+        });
+        self
+    }
+
+    /// Gives the browser a clock, which [`BrowserHandle::clock`] reports. A
+    /// browser reached through a plugin set reports the set's clock first.
+    #[must_use]
+    pub fn clock(mut self, clock: Clock) -> Self {
+        self.browser.clock = Some(clock);
+        self
+    }
+
+    /// The browser.
+    #[must_use]
+    pub fn build(self) -> RecordingBrowser {
+        self.browser
+    }
+}
+
 impl RecordingBrowser {
     /// A fake Chromium browser on the pure CDP engine.
     #[must_use]
@@ -355,22 +454,16 @@ impl RecordingBrowser {
         }
     }
 
-    /// Scripts [`BrowserHandle::extension_workers`]: the first call answers
-    /// with the first snapshot, the second with the second, and the last one
-    /// repeats. Without a script the call answers
-    /// [`PluginError::NotSupported`], as a host without the query does.
+    /// A builder that starts from [`new`](Self::new).
     #[must_use]
-    pub fn with_workers(mut self, snapshots: Vec<Vec<ExtensionWorker>>) -> Self {
-        self.workers = Mutex::new(WorkerScript { snapshots, next: 0 });
-        self
+    pub fn builder() -> RecordingBrowserBuilder {
+        RecordingBrowserBuilder::default()
     }
 
-    /// Gives the browser a clock, which [`BrowserHandle::clock`] reports. A
-    /// browser reached through a plugin set reports the set's clock first.
+    /// A builder that starts from this browser.
     #[must_use]
-    pub fn with_clock(mut self, clock: Clock) -> Self {
-        self.clock = Some(clock);
-        self
+    pub fn into_builder(self) -> RecordingBrowserBuilder {
+        RecordingBrowserBuilder { browser: self }
     }
 
     /// Makes the browser-level command `method` answer with `reply` (otherwise

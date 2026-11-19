@@ -68,7 +68,7 @@ fn a_clone_of_a_page_writes_to_the_same_record() {
 
 #[test]
 fn contexts_and_pages_are_counted_while_open() {
-    let browser = RecordingBrowser::new().with_contexts();
+    let browser = RecordingBrowser::builder().contexts().build();
     let first =
         block_on(browser.new_context(ContextSettings::new().proxy("socks5://x:1"))).unwrap();
     let second = block_on(browser.new_context(ContextSettings::new())).unwrap();
@@ -117,7 +117,7 @@ fn contexts_and_pages_are_counted_while_open() {
 
 #[test]
 fn pages_opened_straight_on_the_browser_are_counted_and_listed() {
-    let browser = RecordingBrowser::new().with_contexts();
+    let browser = RecordingBrowser::builder().contexts().build();
     let page = block_on(browser.new_page(None)).unwrap();
     assert_eq!(browser.live_pages(), 1);
     block_on(page.close()).unwrap();
@@ -135,13 +135,12 @@ fn without_with_contexts_the_browser_offers_none_and_failures_can_be_injected() 
             .unwrap(),
         PluginError::NotSupported(_)
     ));
-    let failing = RecordingBrowser::new()
-        .with_contexts()
+    let failing = RecordingBrowser::builder().contexts().build()
         .failing("new_context");
     assert!(block_on(failing.new_context(ContextSettings::new())).is_err());
     assert_eq!(failing.live_contexts(), 0);
     let ids =
-        RecordingBrowser::new().with_extensions(vec![LoadedExtension::new("abc", "/tmp/ext")]);
+        RecordingBrowser::builder().extensions(vec![LoadedExtension::new("abc", "/tmp/ext")]).build();
     assert_eq!(ids.extensions()[0].id, "abc");
 }
 
@@ -181,8 +180,7 @@ fn the_worker_query_is_recorded_and_can_fail_or_be_unsupported() {
         block_on(plain.extension_workers()),
         Err(PluginError::NotSupported(what)) if what == "extension_workers"
     ));
-    let failing = RecordingBrowser::new()
-        .with_workers(vec![Vec::new()])
+    let failing = RecordingBrowser::builder().workers(vec![Vec::new()]).build()
         .failing("extension_workers");
     assert!(matches!(
         block_on(failing.extension_workers()),
@@ -195,7 +193,7 @@ fn the_worker_query_is_recorded_and_can_fail_or_be_unsupported() {
 fn a_clock_given_to_the_browser_is_reported() {
     assert!(RecordingBrowser::new().clock().is_none());
     let timer = Arc::new(ManualTimer::new());
-    let browser = RecordingBrowser::new().with_clock(Clock::new(timer));
+    let browser = RecordingBrowser::builder().clock(Clock::new(timer)).build();
     assert!(browser.clock().is_some());
 }
 

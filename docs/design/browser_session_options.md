@@ -130,8 +130,8 @@ All additions have default bodies, so no host or plugin changes shape.
 - `ExtensionWorker { id, url }`, `#[non_exhaustive]`, with `new`.
 - `Guarded` forwards both: without that, the trait default would shadow the
   host's implementation for every plugin.
-- `seleniumbase-rs-plugin-testing`: `RecordingBrowser::{with_workers,
-  with_clock, replying}` (`with_extensions` and `failing` were already there,
+- `seleniumbase-rs-plugin-testing`: `RecordingBrowserBuilder::{workers,
+  clock}` and `RecordingBrowser::replying` (`extensions` and `failing` were already there,
   in `contexts.rs`; `failing("extension_workers")` now works too),
   `Call::ExtensionWorkers` (`Call` becomes `#[non_exhaustive]`), and
   `block_on_advancing`, which moves a `ManualTimer` on whenever the future is

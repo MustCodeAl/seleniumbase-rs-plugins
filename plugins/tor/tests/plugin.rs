@@ -365,7 +365,7 @@ fn on_close_stops_every_forwarder() {
         let tor = Arc::new(tor_at(upstream.addr()));
         let plugins = PluginSet::strict().with_shared(shared(&tor)).unwrap();
         let proxy = launched(&plugins).await.proxy.expect("a proxy");
-        let browser = RecordingBrowser::new().with_contexts();
+        let browser = RecordingBrowser::builder().contexts().build();
         let (_, context_proxy) = make_context(&plugins, &browser, Duration::ZERO)
             .await
             .unwrap();
@@ -385,7 +385,7 @@ fn per_context_isolation_gives_every_context_forwarder_circuits_of_its_own() {
         let tor = Arc::new(tor_at(upstream.addr()));
         let plugins = PluginSet::strict().with_shared(shared(&tor)).unwrap();
         let browser_proxy = launched(&plugins).await.proxy.expect("a proxy");
-        let browser = RecordingBrowser::new().with_contexts();
+        let browser = RecordingBrowser::builder().contexts().build();
 
         let (id_a, proxy_a) = make_context(&plugins, &browser, Duration::ZERO)
             .await
@@ -435,7 +435,7 @@ fn contexts_made_at_the_same_time_each_keep_their_own_forwarder() {
         let upstream = FakeSocksUpstream::start(Answer::Succeed).await;
         let tor = Arc::new(tor_at(upstream.addr()));
         let plugins = Arc::new(PluginSet::strict().with_shared(shared(&tor)).unwrap());
-        let browser = Arc::new(RecordingBrowser::new().with_contexts());
+        let browser = Arc::new(RecordingBrowser::builder().contexts().build());
 
         // A takes long to be made, B is quick: B must not overtake A and take
         // A's forwarder.
@@ -523,7 +523,7 @@ fn with_browser_isolation_contexts_are_left_alone() {
         let tor = Arc::new(Tor::new(config).unwrap());
         let plugins = PluginSet::strict().with_shared(shared(&tor)).unwrap();
         let _ = launched(&plugins).await;
-        let browser = RecordingBrowser::new().with_contexts();
+        let browser = RecordingBrowser::builder().contexts().build();
         let (_, proxy) = make_context(&plugins, &browser, Duration::ZERO)
             .await
             .unwrap();
@@ -537,7 +537,7 @@ fn the_number_of_live_contexts_is_bounded() {
     run(async {
         let tor = Arc::new(tor_at(dead_address()));
         let plugins = PluginSet::strict().with_shared(shared(&tor)).unwrap();
-        let browser = RecordingBrowser::new().with_contexts();
+        let browser = RecordingBrowser::builder().contexts().build();
         let mut first = None;
         for _ in 0..Tor::MAX_CONTEXT_FORWARDERS {
             let (id, _) = make_context(&plugins, &browser, Duration::ZERO)

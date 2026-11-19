@@ -825,7 +825,7 @@ fn navigate_is_fine_in_a_hook_that_does_not_run_before_navigate() {
 #[test]
 fn opening_a_tab_inside_a_context_hook_is_reentrant() {
     let seen = Seen::default();
-    let browser = RecordingBrowser::new().with_contexts();
+    let browser = RecordingBrowser::builder().contexts().build();
     let context = block_on(browser.new_context(ContextSettings::new())).unwrap();
     let set = one(Actor::new("opener", Act::NewPage, &seen).with(Capability::Contexts));
 
@@ -844,7 +844,7 @@ fn opening_a_tab_inside_a_context_hook_is_reentrant() {
 fn a_browser_hook_may_open_contexts_with_the_capability_and_not_without() {
     for (granted, expected) in [(true, 1), (false, 0)] {
         let seen = Seen::default();
-        let browser = RecordingBrowser::new().with_contexts();
+        let browser = RecordingBrowser::builder().contexts().build();
         let mut actor = Actor::new("opener", Act::NewContext, &seen);
         if granted {
             actor = actor.with(Capability::Contexts);
@@ -913,7 +913,7 @@ fn a_raw_context_with_a_proxy_needs_launch_proxy_and_yields_to_a_seal() {
 #[test]
 fn what_a_guarded_handle_opens_is_guarded_too() {
     let seen = Seen::default();
-    let browser = RecordingBrowser::new().with_contexts();
+    let browser = RecordingBrowser::builder().contexts().build();
     let set = one(Actor::new("deep", Act::ContextThenFetch, &seen).with(Capability::Contexts));
 
     block_on(set.on_browser(&browser)).unwrap();
@@ -1276,7 +1276,7 @@ mod host_queries {
     fn a_plugin_that_loads_extensions_gets_the_hosts_workers() {
         let (asker, seen) = Asker::new(vec![Capability::LaunchExtensions]);
         let set = PluginSet::new().with(asker).unwrap();
-        let browser = RecordingBrowser::new().with_workers(vec![vec![worker()]]);
+        let browser = RecordingBrowser::builder().workers(vec![vec![worker()]]).build();
 
         block_on(set.on_browser(&browser)).unwrap();
 
@@ -1292,7 +1292,7 @@ mod host_queries {
     fn a_plugin_that_does_not_load_extensions_is_refused_before_the_host_is_asked() {
         let (asker, seen) = Asker::new(Vec::new());
         let set = PluginSet::new().with(asker).unwrap();
-        let browser = RecordingBrowser::new().with_workers(vec![vec![worker()]]);
+        let browser = RecordingBrowser::builder().workers(vec![vec![worker()]]).build();
 
         block_on(set.on_browser(&browser)).unwrap();
 
@@ -1326,7 +1326,7 @@ mod host_queries {
 
     #[test]
     fn the_snapshots_of_the_fake_come_one_per_call_and_the_last_repeats() {
-        let browser = RecordingBrowser::new().with_workers(vec![Vec::new(), vec![worker()]]);
+        let browser = RecordingBrowser::builder().workers(vec![Vec::new(), vec![worker()]]).build();
         assert!(block_on(browser.extension_workers()).unwrap().is_empty());
         assert_eq!(block_on(browser.extension_workers()).unwrap(), [worker()]);
         assert_eq!(block_on(browser.extension_workers()).unwrap(), [worker()]);
@@ -1379,7 +1379,7 @@ mod host_queries {
 
         let (asker, seen) = Asker::new(vec![Capability::Clock]);
         let set = PluginSet::new().with(asker).unwrap();
-        let browser = RecordingBrowser::new().with_clock(host_clock);
+        let browser = RecordingBrowser::builder().clock(host_clock).build();
         block_on(set.on_browser(&browser)).unwrap();
         assert!(seen.lock().unwrap().clock.as_ref().unwrap().is_some());
 

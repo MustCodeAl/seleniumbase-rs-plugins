@@ -363,7 +363,7 @@ fn context_hooks_reach_only_plugins_that_hold_the_contexts_capability() {
         .unwrap()
         .with(Probe::named("ctx", &log).with(Capability::Contexts))
         .unwrap();
-    let browser = RecordingBrowser::new().with_contexts();
+    let browser = RecordingBrowser::builder().contexts().build();
     let mut settings = ContextSettings::new();
     block_on(set.before_context(&mut settings)).unwrap();
     let context = block_on(browser.new_context(settings)).unwrap();
@@ -477,7 +477,7 @@ fn a_failing_context_hook_stops_the_context_and_closing_collects_failures() {
         .unwrap();
     let error = block_on(set.before_context(&mut ContextSettings::new())).unwrap_err();
     assert!(error.to_string().contains("before_context"), "{error}");
-    let browser = RecordingBrowser::new().with_contexts();
+    let browser = RecordingBrowser::builder().contexts().build();
     let context = block_on(browser.new_context(ContextSettings::new())).unwrap();
     let error = block_on(set.on_context_created(&*context)).unwrap_err();
     assert!(error.to_string().contains("on_context_created"), "{error}");

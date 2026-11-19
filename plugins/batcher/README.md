@@ -140,5 +140,5 @@ let set = PluginSet::strict().with(batcher)?;
 assert_eq!(set.task_names(), ["batcher"]);
 ```
 
-With `RecordingBrowser::with_contexts()` the fakes count live contexts and tabs,
+With `RecordingBrowser::builder().contexts().build()` the fakes count live contexts and tabs,
 so a test can check that `concurrency` is kept (see `tests/run.rs`).
