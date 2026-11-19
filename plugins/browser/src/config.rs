@@ -128,6 +128,106 @@ fn bad(message: String) -> PluginError {
     PluginError::Config(format!("browser: {message}"))
 }
 
+/// Builds a [`SessionConfig`]. [`SessionConfig::builder`] starts from the
+/// defaults; [`SessionConfig::into_builder`] starts from a config that already
+/// exists. Setters only store the value. [`build`](Self::build) runs the checks.
+#[must_use = "a builder does nothing until `build` is called"]
+#[derive(Clone, Debug)]
+pub struct SessionConfigBuilder {
+    config: SessionConfig,
+}
+
+impl Default for SessionConfigBuilder {
+    fn default() -> Self {
+        Self {
+            config: SessionConfig::default(),
+        }
+    }
+}
+
+impl SessionConfigBuilder {
+    /// Adds a `.zip` or `.crx` file.
+    #[must_use]
+    pub fn zip(mut self, path: impl Into<PathBuf>) -> Self {
+        self.config.extension_zip.push(path.into());
+        self
+    }
+
+    /// Adds an unpacked extension folder.
+    #[must_use]
+    pub fn dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.config.extension_dir.push(path.into());
+        self
+    }
+
+    /// Turns `wait_for_workers` on or off.
+    #[must_use]
+    pub fn wait_for_workers(mut self, wait: bool) -> Self {
+        self.config.wait_for_workers = wait;
+        self
+    }
+
+    /// Sets how many seconds `wait_for_workers` waits.
+    #[must_use]
+    pub fn worker_timeout_secs(mut self, seconds: u64) -> Self {
+        self.config.worker_timeout_secs = Some(seconds);
+        self
+    }
+
+    /// Names the saved session to restore.
+    #[must_use]
+    pub fn session(mut self, name: impl Into<String>) -> Self {
+        self.config.session = Some(name.into());
+        self
+    }
+
+    /// Turns `save_on_close` on or off.
+    #[must_use]
+    pub fn save_on_close(mut self, save: bool) -> Self {
+        self.config.save_on_close = save;
+        self
+    }
+
+    /// Sets the folder the session files live in.
+    #[must_use]
+    pub fn session_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.config.session_dir = Some(dir.into());
+        self
+    }
+
+    /// Turns `interactive` on or off.
+    #[must_use]
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.config.interactive = interactive;
+        self
+    }
+
+    /// Sets what the person is told while the interactive task waits.
+    #[must_use]
+    pub fn pause_message(mut self, message: impl Into<String>) -> Self {
+        self.config.pause_message = Some(message.into());
+        self
+    }
+
+    /// Checks every option and returns the config.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Config`] (the text starts with `browser:` and names the
+    /// option) when an entry is empty, an `extension_dir` path holds a comma,
+    /// `wait_for_workers` is on without an extension, `worker_timeout_secs` is
+    /// set without that wait or is outside 1 to 30, `session` is not a valid
+    /// name, `save_on_close`, `session_dir` or `interactive` is set without
+    /// `session`, `session_dir` is empty or holds a NUL, saving a session is
+    /// asked for on a system without Unix file permissions, or `pause_message`
+    /// is set without `interactive`, is empty, is longer than 500 characters,
+    /// or holds a control character other than a newline.
+    pub fn build(self) -> Result<SessionConfig> {
+        self.config.check()?;
+        Ok(self.config)
+    }
+}
+
 impl SessionConfig {
     /// No extensions.
     #[must_use]
@@ -135,68 +235,17 @@ impl SessionConfig {
         Self::default()
     }
 
-    /// Adds a `.zip` or `.crx` file.
+    /// A builder that starts from the defaults: no extensions, and the other
+    /// options off.
     #[must_use]
-    pub fn with_zip(mut self, path: impl Into<PathBuf>) -> Self {
-        self.extension_zip.push(path.into());
-        self
+    pub fn builder() -> SessionConfigBuilder {
+        SessionConfigBuilder::default()
     }
 
-    /// Adds an unpacked extension folder.
+    /// A builder that starts from this config.
     #[must_use]
-    pub fn with_dir(mut self, path: impl Into<PathBuf>) -> Self {
-        self.extension_dir.push(path.into());
-        self
-    }
-
-    /// Turns `wait_for_workers` on or off.
-    #[must_use]
-    pub fn with_wait_for_workers(mut self, wait: bool) -> Self {
-        self.wait_for_workers = wait;
-        self
-    }
-
-    /// Sets how many seconds `wait_for_workers` waits.
-    #[must_use]
-    pub fn with_worker_timeout_secs(mut self, seconds: u64) -> Self {
-        self.worker_timeout_secs = Some(seconds);
-        self
-    }
-
-    /// Names the saved session to restore.
-    #[must_use]
-    pub fn with_session(mut self, name: impl Into<String>) -> Self {
-        self.session = Some(name.into());
-        self
-    }
-
-    /// Turns `save_on_close` on or off.
-    #[must_use]
-    pub fn with_save_on_close(mut self, save: bool) -> Self {
-        self.save_on_close = save;
-        self
-    }
-
-    /// Sets the folder the session files live in.
-    #[must_use]
-    pub fn with_session_dir(mut self, dir: impl Into<PathBuf>) -> Self {
-        self.session_dir = Some(dir.into());
-        self
-    }
-
-    /// Turns `interactive` on or off.
-    #[must_use]
-    pub fn with_interactive(mut self, interactive: bool) -> Self {
-        self.interactive = interactive;
-        self
-    }
-
-    /// Sets what the person is told while the interactive task waits.
-    #[must_use]
-    pub fn with_pause_message(mut self, message: impl Into<String>) -> Self {
-        self.pause_message = Some(message.into());
-
-        self
+    pub fn into_builder(self) -> SessionConfigBuilder {
+        SessionConfigBuilder { config: self }
     }
 
     /// Whether no extension is configured.
@@ -360,5 +409,22 @@ impl SessionConfig {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_refuses_a_wait_with_no_extension() {
+        let error = SessionConfig::builder()
+            .wait_for_workers(true)
+            .build()
+            .expect_err("no extension to wait for");
+        assert!(matches!(error, PluginError::Config(_)), "{error:?}");
+        let text = error.to_string();
+        assert!(text.starts_with("browser:"), "{text}");
+        assert!(text.contains("`wait_for_workers`"), "{text}");
     }
 }

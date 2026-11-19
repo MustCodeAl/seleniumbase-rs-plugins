@@ -14,9 +14,10 @@ cargo add seleniumbase-rs-plugin-browser --git https://github.com/MustCodeAl/sel
 use seleniumbase_rs_plugin::PluginSet;
 use seleniumbase_rs_plugin_browser::{BrowserSession, SessionConfig};
 
-let config = SessionConfig::new()
-    .with_zip("extensions/dark-reader.crx")
-    .with_dir("my-extension");
+let config = SessionConfig::builder()
+    .zip("extensions/dark-reader.crx")
+    .dir("my-extension")
+    .build()?;
 let plugins = PluginSet::strict().with(BrowserSession::new(config)?)?;
 # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
 ```

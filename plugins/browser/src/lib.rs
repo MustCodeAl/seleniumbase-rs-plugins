@@ -14,9 +14,10 @@
 //! use seleniumbase_rs_plugin::PluginSet;
 //! use seleniumbase_rs_plugin_browser::{BrowserSession, SessionConfig};
 //!
-//! let config = SessionConfig::new()
-//!     .with_zip("extensions/dark-reader.crx")
-//!     .with_dir("my-extension");
+//! let config = SessionConfig::builder()
+//!     .zip("extensions/dark-reader.crx")
+//!     .dir("my-extension")
+//!     .build()?;
 //! let plugins = PluginSet::strict().with(BrowserSession::new(config)?)?;
 //! assert_eq!(plugins.names(), ["browser"]);
 //! # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
@@ -90,7 +91,7 @@ use seleniumbase_rs_plugin::{
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-pub use config::SessionConfig;
+pub use config::{SessionConfig, SessionConfigBuilder};
 
 /// The name the plugin is enabled by.
 const NAME: &str = "browser";
