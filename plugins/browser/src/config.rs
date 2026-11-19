@@ -205,7 +205,7 @@ impl SessionConfigBuilder {
     ///
     /// # Errors
     ///
-    /// [`PluginError::Config`] (the text starts with `browser:` and names the
+    /// [`PluginError::Config`] (the text contains `browser:` and names the
     /// option) when an entry is empty, an `extension_dir` path holds a comma,
     /// `wait_for_workers` is on without an extension, `worker_timeout_secs` is
     /// set without that wait or is outside 1 to 30, `session` is not a valid
@@ -416,7 +416,7 @@ mod tests {
             .expect_err("no extension to wait for");
         assert!(matches!(error, PluginError::Config(_)), "{error:?}");
         let text = error.to_string();
-        assert!(text.starts_with("browser:"), "{text}");
+        assert!(text.starts_with("plugin configuration: browser:"), "{text}");
         assert!(text.contains("`wait_for_workers`"), "{text}");
     }
 }
