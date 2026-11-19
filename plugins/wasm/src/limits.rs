@@ -43,43 +43,35 @@ impl Default for Limits {
 /// [`Limits::into_builder`] starts from limits that already exist. `0` is
 /// allowed: [`build`](Self::build) does not add a check.
 #[must_use = "a builder does nothing until `build` is called"]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LimitsBuilder {
     limits: Limits,
 }
 
-impl Default for LimitsBuilder {
-    fn default() -> Self {
-        Self {
-            limits: Limits::default(),
-        }
-    }
-}
-
 impl LimitsBuilder {
     /// Sets [`Limits::max_module_bytes`].
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn max_module_bytes(mut self, bytes: usize) -> Self {
         self.limits.max_module_bytes = bytes;
         self
     }
 
     /// Sets [`Limits::max_memory_bytes`].
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn max_memory_bytes(mut self, bytes: usize) -> Self {
         self.limits.max_memory_bytes = bytes;
         self
     }
 
     /// Sets [`Limits::fuel_per_call`].
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn fuel_per_call(mut self, fuel: u64) -> Self {
         self.limits.fuel_per_call = fuel;
         self
     }
 
     /// Sets [`Limits::max_value_bytes`].
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn max_value_bytes(mut self, bytes: usize) -> Self {
         self.limits.max_value_bytes = bytes;
         self
@@ -94,13 +86,13 @@ impl LimitsBuilder {
 
 impl Limits {
     /// A builder that starts from [`Limits::default`].
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn builder() -> LimitsBuilder {
         LimitsBuilder::default()
     }
 
     /// A builder that starts from these limits.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn into_builder(self) -> LimitsBuilder {
         LimitsBuilder { limits: self }
     }

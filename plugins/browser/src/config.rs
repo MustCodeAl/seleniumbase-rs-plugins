@@ -132,78 +132,70 @@ fn bad(message: String) -> PluginError {
 /// defaults; [`SessionConfig::into_builder`] starts from a config that already
 /// exists. Setters only store the value. [`build`](Self::build) runs the checks.
 #[must_use = "a builder does nothing until `build` is called"]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SessionConfigBuilder {
     config: SessionConfig,
 }
 
-impl Default for SessionConfigBuilder {
-    fn default() -> Self {
-        Self {
-            config: SessionConfig::default(),
-        }
-    }
-}
-
 impl SessionConfigBuilder {
     /// Adds a `.zip` or `.crx` file.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn zip(mut self, path: impl Into<PathBuf>) -> Self {
         self.config.extension_zip.push(path.into());
         self
     }
 
     /// Adds an unpacked extension folder.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.config.extension_dir.push(path.into());
         self
     }
 
     /// Turns `wait_for_workers` on or off.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn wait_for_workers(mut self, wait: bool) -> Self {
         self.config.wait_for_workers = wait;
         self
     }
 
     /// Sets how many seconds `wait_for_workers` waits.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn worker_timeout_secs(mut self, seconds: u64) -> Self {
         self.config.worker_timeout_secs = Some(seconds);
         self
     }
 
     /// Names the saved session to restore.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn session(mut self, name: impl Into<String>) -> Self {
         self.config.session = Some(name.into());
         self
     }
 
     /// Turns `save_on_close` on or off.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn save_on_close(mut self, save: bool) -> Self {
         self.config.save_on_close = save;
         self
     }
 
     /// Sets the folder the session files live in.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn session_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.config.session_dir = Some(dir.into());
         self
     }
 
     /// Turns `interactive` on or off.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.config.interactive = interactive;
         self
     }
 
     /// Sets what the person is told while the interactive task waits.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn pause_message(mut self, message: impl Into<String>) -> Self {
         self.config.pause_message = Some(message.into());
         self
@@ -237,13 +229,13 @@ impl SessionConfig {
 
     /// A builder that starts from the defaults: no extensions, and the other
     /// options off.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn builder() -> SessionConfigBuilder {
         SessionConfigBuilder::default()
     }
 
     /// A builder that starts from this config.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn into_builder(self) -> SessionConfigBuilder {
         SessionConfigBuilder { config: self }
     }

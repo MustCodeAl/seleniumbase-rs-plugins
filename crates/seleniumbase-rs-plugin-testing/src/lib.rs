@@ -150,22 +150,14 @@ impl Default for RecordingPage {
 /// that already exists. `evaluating`, `at`, `in_context`, `failing` and
 /// `replying` stay on the page.
 #[must_use = "a builder does nothing until `build` is called"]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RecordingPageBuilder {
     page: RecordingPage,
 }
 
-impl Default for RecordingPageBuilder {
-    fn default() -> Self {
-        Self {
-            page: RecordingPage::new(),
-        }
-    }
-}
-
 impl RecordingPageBuilder {
     /// Sets the id [`PageHandle::id`] answers with.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn id(mut self, id: PageId) -> Self {
         self.page.id = id;
         self
@@ -220,13 +212,13 @@ impl RecordingPage {
     }
 
     /// A builder that starts from [`new`](Self::new).
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn builder() -> RecordingPageBuilder {
         RecordingPageBuilder::default()
     }
 
     /// A builder that starts from this page.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn into_builder(self) -> RecordingPageBuilder {
         RecordingPageBuilder { page: self }
     }
@@ -374,30 +366,22 @@ impl Default for RecordingBrowser {
 /// [`RecordingBrowser::new`]; [`RecordingBrowser::into_builder`] starts from a
 /// browser that already exists. `failing` and `replying` stay on the browser.
 #[must_use = "a builder does nothing until `build` is called"]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RecordingBrowserBuilder {
     browser: RecordingBrowser,
-}
-
-impl Default for RecordingBrowserBuilder {
-    fn default() -> Self {
-        Self {
-            browser: RecordingBrowser::new(),
-        }
-    }
 }
 
 impl RecordingBrowserBuilder {
     /// Lets plugins open contexts and tabs (`BrowserHandle::new_context` and
     /// `BrowserHandle::new_page`) and counts them.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn contexts(mut self) -> Self {
         self.browser.world = Some(Arc::new(contexts::World::default()));
         self
     }
 
     /// Sets the extensions `BrowserHandle::extensions` reports.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn extensions(mut self, extensions: Vec<LoadedExtension>) -> Self {
         self.browser.extensions = extensions;
         self
@@ -407,7 +391,7 @@ impl RecordingBrowserBuilder {
     /// with the first snapshot, the second with the second, and the last one
     /// repeats. Without a script the call answers
     /// [`PluginError::NotSupported`], as a host without the query does.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn workers(mut self, snapshots: Vec<Vec<ExtensionWorker>>) -> Self {
         self.browser.workers = Mutex::new(WorkerScript { snapshots, next: 0 });
         self
@@ -415,7 +399,7 @@ impl RecordingBrowserBuilder {
 
     /// Gives the browser a clock, which [`BrowserHandle::clock`] reports. A
     /// browser reached through a plugin set reports the set's clock first.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn clock(mut self, clock: Clock) -> Self {
         self.browser.clock = Some(clock);
         self
@@ -452,13 +436,13 @@ impl RecordingBrowser {
     }
 
     /// A builder that starts from [`new`](Self::new).
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn builder() -> RecordingBrowserBuilder {
         RecordingBrowserBuilder::default()
     }
 
     /// A builder that starts from this browser.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn into_builder(self) -> RecordingBrowserBuilder {
         RecordingBrowserBuilder { browser: self }
     }

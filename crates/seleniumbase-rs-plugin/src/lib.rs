@@ -1502,6 +1502,7 @@ fn verify_launch(
 /// Builds a [`PluginSet`]. [`PluginSet::builder`] starts empty and not strict;
 /// [`PluginSet::into_builder`] starts from a set that already exists.
 /// [`build`](Self::build) does not fail: the plugins are already in the set.
+#[derive(Default)]
 #[must_use = "a builder does nothing until `build` is called"]
 pub struct PluginSetBuilder {
     set: PluginSet,
@@ -1517,19 +1518,11 @@ impl fmt::Debug for PluginSetBuilder {
     }
 }
 
-impl Default for PluginSetBuilder {
-    fn default() -> Self {
-        Self {
-            set: PluginSet::default(),
-        }
-    }
-}
-
 impl PluginSetBuilder {
     /// Gives the set a timer. Tasks get a [`Clock`] over it
     /// ([`PluginSet::clock`]), and the time limits of the hooks ([`Budgets`])
     /// apply only to a set that has one: without a timer nothing times out.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn timer(mut self, timer: Arc<dyn Timer>) -> Self {
         self.set.timer = Some(timer);
         self
@@ -1547,13 +1540,13 @@ impl PluginSet {
     /// An empty builder: no plugins, and not strict.
     /// [`into_builder`](Self::into_builder) starts from a set that already exists.
     /// Give it a timer with [`PluginSetBuilder::timer`].
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn builder() -> PluginSetBuilder {
         PluginSetBuilder::default()
     }
 
     /// A builder that starts from this set.
-    #[must_use]
+    #[must_use = "a builder does nothing until `build` is called"]
     pub fn into_builder(self) -> PluginSetBuilder {
         PluginSetBuilder { set: self }
     }
