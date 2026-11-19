@@ -102,7 +102,7 @@ fn plugin(config: SessionConfig) -> BrowserSession {
 /// A config from the builder. The checks run here, so a value that reaches
 /// [`plugin`] has already passed them; a bad combination is asserted on
 /// `build`, and the JSON path is what the plugin itself refuses.
-fn checked(builder: SessionConfigBuilder) -> SessionConfig {
+pub(crate) fn checked(builder: SessionConfigBuilder) -> SessionConfig {
     builder.build().expect("valid options")
 }
 
