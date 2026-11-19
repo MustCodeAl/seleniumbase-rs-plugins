@@ -173,7 +173,12 @@ fn an_empty_text_means_no_extension() {
 
 #[test]
 fn the_builder_adds_in_order() {
-    let config = checked(SessionConfig::builder().zip("a.zip").zip("b.crx").dir("dir"));
+    let config = checked(
+        SessionConfig::builder()
+            .zip("a.zip")
+            .zip("b.crx")
+            .dir("dir"),
+    );
     assert_eq!(
         config.extension_zip,
         [PathBuf::from("a.zip"), "b.crx".into()]
@@ -515,9 +520,11 @@ fn the_format_is_read_from_the_bytes_and_not_from_the_extension() {
     let fixtures = tempfile::tempdir().expect("temp dir");
     let crx_named_zip = write(fixtures.path(), "really-crx.zip", &crx3(&archive("one")));
     let zip_named_crx = write(fixtures.path(), "really-zip.crx", &archive("two"));
-    let plugin = plugin(
-        checked(SessionConfig::builder().zip(&crx_named_zip).zip(&zip_named_crx)),
-    );
+    let plugin = plugin(checked(
+        SessionConfig::builder()
+            .zip(&crx_named_zip)
+            .zip(&zip_named_crx),
+    ));
     assert_eq!(names(&launched(&plugin)), ["one", "two"]);
 }
 
@@ -560,9 +567,9 @@ fn zips_come_first_then_folders_and_each_list_keeps_its_order() {
     let d1 = unpacked(fixtures.path(), "d1", "dir-1");
     let d2 = unpacked(fixtures.path(), "d2", "dir-2");
     // The folders are added first on purpose: Python handles the zips first.
-    let plugin = plugin(
-        checked(SessionConfig::builder().dir(&d1).dir(&d2).zip(&z1).zip(&z2)),
-    );
+    let plugin = plugin(checked(
+        SessionConfig::builder().dir(&d1).dir(&d2).zip(&z1).zip(&z2),
+    ));
     let launch = launched(&plugin);
     assert_eq!(names(&launch), ["zip-1", "zip-2", "dir-1", "dir-2"]);
     assert_eq!(launch.extensions[2], canonical(&d1));
@@ -602,9 +609,13 @@ fn the_same_extension_listed_twice_is_loaded_once() {
     let fixtures = tempfile::tempdir().expect("temp dir");
     let folder = unpacked(fixtures.path(), "ext", "once");
     let zip = write(fixtures.path(), "e.zip", &archive("once-zip"));
-    let plugin = plugin(
-        checked(SessionConfig::builder().dir(&folder).dir(folder.join(".")).zip(&zip).zip(fixtures.path().join("./e.zip"))),
-    );
+    let plugin = plugin(checked(
+        SessionConfig::builder()
+            .dir(&folder)
+            .dir(folder.join("."))
+            .zip(&zip)
+            .zip(fixtures.path().join("./e.zip")),
+    ));
     assert_eq!(names(&launched(&plugin)), ["once-zip", "once"]);
 }
 
@@ -679,7 +690,9 @@ fn a_good_extension_before_a_bad_one_adds_nothing() {
     let fixtures = tempfile::tempdir().expect("temp dir");
     let good = write(fixtures.path(), "good.zip", &archive("good"));
     let bad = fixtures.path().join("bad.zip");
-    let text = refusal(&plugin(checked(SessionConfig::builder().zip(&good).zip(&bad))));
+    let text = refusal(&plugin(checked(
+        SessionConfig::builder().zip(&good).zip(&bad),
+    )));
     assert!(text.contains("bad.zip"), "{text}");
 }
 
@@ -802,9 +815,9 @@ fn two_pooled_browsers_close_independently() {
     let zip = write(fixtures.path(), "ext.zip", &archive("pooled"));
     let folder = unpacked(fixtures.path(), "plain", "plain");
     let template = PluginSet::strict()
-        .with(plugin(
-            checked(SessionConfig::builder().zip(&zip).dir(&folder)),
-        ))
+        .with(plugin(checked(
+            SessionConfig::builder().zip(&zip).dir(&folder),
+        )))
         .expect("a strict set takes it");
 
     let first = template.for_launch();
@@ -1067,10 +1080,13 @@ fn it_waits_until_the_worker_shows_up() {
     let folder = unpacked_with_worker(fixtures.path(), "ext", "alive");
     let config = checked(SessionConfig::builder().dir(&folder).wait_for_workers(true));
     let (set, timer, launch) = launched_set(config, true);
-    let browser = RecordingBrowser::builder().extensions(vec![LoadedExtension::new(
-        "aaaa",
-        launch.extensions[0].clone(),
-    )]).workers(vec![vec![], vec![], vec![worker_of("aaaa")]]).build();
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .workers(vec![vec![], vec![], vec![worker_of("aaaa")]])
+        .build();
 
     on_browser(&set, &timer, &browser).expect("the worker shows up");
 
@@ -1084,10 +1100,13 @@ fn a_worker_that_is_already_running_costs_no_waiting() {
     let folder = unpacked_with_worker(fixtures.path(), "ext", "ready");
     let config = checked(SessionConfig::builder().dir(&folder).wait_for_workers(true));
     let (set, timer, launch) = launched_set(config, true);
-    let browser = RecordingBrowser::builder().extensions(vec![LoadedExtension::new(
-        "aaaa",
-        launch.extensions[0].clone(),
-    )]).workers(vec![vec![worker_of("aaaa")]]).build();
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .workers(vec![vec![worker_of("aaaa")]])
+        .build();
     on_browser(&set, &timer, &browser).expect("already there");
     assert_eq!(browser.calls(), [Call::ExtensionWorkers]);
     assert_eq!(timer.elapsed(), Duration::ZERO);
@@ -1098,13 +1117,21 @@ fn it_skips_extensions_without_a_worker_and_ones_other_plugins_loaded() {
     let fixtures = tempfile::tempdir().expect("temp dir");
     let with = unpacked_with_worker(fixtures.path(), "with", "with");
     let without = unpacked(fixtures.path(), "without", "without");
-    let config = checked(SessionConfig::builder().dir(&with).dir(&without).wait_for_workers(true));
+    let config = checked(
+        SessionConfig::builder()
+            .dir(&with)
+            .dir(&without)
+            .wait_for_workers(true),
+    );
     let (set, timer, launch) = launched_set(config, true);
-    let browser = RecordingBrowser::builder().extensions(vec![
-        LoadedExtension::new("aaaa", launch.extensions[0].clone()),
-        LoadedExtension::new("bbbb", launch.extensions[1].clone()),
-        LoadedExtension::new("zzzz", "/elsewhere/foreign"),
-    ]).workers(vec![vec![worker_of("aaaa")]]).build();
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![
+            LoadedExtension::new("aaaa", launch.extensions[0].clone()),
+            LoadedExtension::new("bbbb", launch.extensions[1].clone()),
+            LoadedExtension::new("zzzz", "/elsewhere/foreign"),
+        ])
+        .workers(vec![vec![worker_of("aaaa")]])
+        .build();
     on_browser(&set, &timer, &browser).expect("only the extension with a worker is awaited");
     assert_eq!(timer.elapsed(), Duration::ZERO);
 }
@@ -1113,12 +1140,20 @@ fn it_skips_extensions_without_a_worker_and_ones_other_plugins_loaded() {
 fn another_plugins_worker_does_not_stand_in_for_ours() {
     let fixtures = tempfile::tempdir().expect("temp dir");
     let folder = unpacked_with_worker(fixtures.path(), "ext", "mine");
-    let config = checked(SessionConfig::builder().dir(&folder).wait_for_workers(true).worker_timeout_secs(2));
+    let config = checked(
+        SessionConfig::builder()
+            .dir(&folder)
+            .wait_for_workers(true)
+            .worker_timeout_secs(2),
+    );
     let (set, timer, launch) = launched_set(config, true);
-    let browser = RecordingBrowser::builder().extensions(vec![
-        LoadedExtension::new("aaaa", launch.extensions[0].clone()),
-        LoadedExtension::new("zzzz", "/elsewhere/foreign"),
-    ]).workers(vec![vec![worker_of("zzzz")]]).build();
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![
+            LoadedExtension::new("aaaa", launch.extensions[0].clone()),
+            LoadedExtension::new("zzzz", "/elsewhere/foreign"),
+        ])
+        .workers(vec![vec![worker_of("zzzz")]])
+        .build();
     let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("ours never runs"));
     assert!(text.contains("aaaa"), "{text}");
     assert!(!text.contains("zzzz"), "{text}");
@@ -1129,12 +1164,21 @@ fn it_gives_up_after_the_timeout_naming_the_option_the_extensions_and_the_time()
     let fixtures = tempfile::tempdir().expect("temp dir");
     let running = unpacked_with_worker(fixtures.path(), "running", "running");
     let stuck = unpacked_with_worker(fixtures.path(), "stuck", "stuck");
-    let config = checked(SessionConfig::builder().dir(&running).dir(&stuck).wait_for_workers(true).worker_timeout_secs(3));
+    let config = checked(
+        SessionConfig::builder()
+            .dir(&running)
+            .dir(&stuck)
+            .wait_for_workers(true)
+            .worker_timeout_secs(3),
+    );
     let (set, timer, launch) = launched_set(config, true);
-    let browser = RecordingBrowser::builder().extensions(vec![
-        LoadedExtension::new("aaaa", launch.extensions[0].clone()),
-        LoadedExtension::new("bbbb", launch.extensions[1].clone()),
-    ]).workers(vec![vec![worker_of("aaaa")]]).build();
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![
+            LoadedExtension::new("aaaa", launch.extensions[0].clone()),
+            LoadedExtension::new("bbbb", launch.extensions[1].clone()),
+        ])
+        .workers(vec![vec![worker_of("aaaa")]])
+        .build();
 
     let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("bbbb never starts"));
 
@@ -1162,15 +1206,23 @@ fn the_default_wait_is_ten_seconds_and_the_longest_is_not_cut_by_the_hook_limit(
             10,
         ),
         (
-            checked(SessionConfig::builder().dir(&folder).wait_for_workers(true).worker_timeout_secs(30)),
+            checked(
+                SessionConfig::builder()
+                    .dir(&folder)
+                    .wait_for_workers(true)
+                    .worker_timeout_secs(30),
+            ),
             30,
         ),
     ] {
         let (set, timer, launch) = launched_set(config, true);
-        let browser = RecordingBrowser::builder().extensions(vec![LoadedExtension::new(
-            "aaaa",
-            launch.extensions[0].clone(),
-        )]).workers(vec![vec![]]).build();
+        let browser = RecordingBrowser::builder()
+            .extensions(vec![LoadedExtension::new(
+                "aaaa",
+                launch.extensions[0].clone(),
+            )])
+            .workers(vec![vec![]])
+            .build();
         let error = on_browser(&set, &timer, &browser).expect_err("it never starts");
         // The plugin's own message, not the bare time-out of the set's limit
         // for the hook, which is 10 s unless the plugin asks for more.
@@ -1191,10 +1243,12 @@ fn a_host_that_cannot_list_workers_makes_the_launch_fail_naming_the_option() {
     let config = checked(SessionConfig::builder().dir(&folder).wait_for_workers(true));
     let (set, timer, launch) = launched_set(config, true);
     // No script: `extension_workers` answers NotSupported, as the default does.
-    let browser = RecordingBrowser::builder().extensions(vec![LoadedExtension::new(
-        "aaaa",
-        launch.extensions[0].clone(),
-    )]).build();
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .build();
     let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("not supported"));
     assert!(text.contains("`wait_for_workers`"), "{text}");
     assert!(text.contains("service workers"), "{text}");
@@ -1220,10 +1274,13 @@ fn a_set_without_a_timer_cannot_wait_and_says_so() {
     let folder = unpacked_with_worker(fixtures.path(), "ext", "no-clock");
     let config = checked(SessionConfig::builder().dir(&folder).wait_for_workers(true));
     let (set, _timer, launch) = launched_set(config, false);
-    let browser = RecordingBrowser::builder().extensions(vec![LoadedExtension::new(
-        "aaaa",
-        launch.extensions[0].clone(),
-    )]).workers(vec![vec![worker_of("aaaa")]]).build();
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .workers(vec![vec![worker_of("aaaa")]])
+        .build();
     let text = hook_failure(block_on(set.on_browser(&browser)).expect_err("no clock"));
     assert!(text.contains("`wait_for_workers`"), "{text}");
     assert!(text.contains("clock"), "{text}");
@@ -1246,10 +1303,13 @@ fn a_failing_host_query_fails_the_hook() {
     let folder = unpacked_with_worker(fixtures.path(), "ext", "broken-host");
     let config = checked(SessionConfig::builder().dir(&folder).wait_for_workers(true));
     let (set, timer, launch) = launched_set(config, true);
-    let browser = RecordingBrowser::builder().extensions(vec![LoadedExtension::new(
-        "aaaa",
-        launch.extensions[0].clone(),
-    )]).workers(vec![vec![]]).build()
+    let browser = RecordingBrowser::builder()
+        .extensions(vec![LoadedExtension::new(
+            "aaaa",
+            launch.extensions[0].clone(),
+        )])
+        .workers(vec![vec![]])
+        .build()
         .failing("extension_workers");
     let text = hook_failure(on_browser(&set, &timer, &browser).expect_err("the host fails"));
     assert!(text.contains("extension_workers"), "{text}");
@@ -1288,14 +1348,12 @@ fn waiting_asks_for_the_clock_and_a_longer_limit_for_on_browser_only() {
         Duration::from_secs(10)
     );
 
-    let slow = plugin(
-        checked(
-                    base()
-                        .into_builder()
-                        .wait_for_workers(true)
-                        .worker_timeout_secs(30),
-                ),
-    )
+    let slow = plugin(checked(
+        base()
+            .into_builder()
+            .wait_for_workers(true)
+            .worker_timeout_secs(30),
+    ))
     .metadata();
     assert_eq!(
         slow.budgets.limit_for("on_browser"),
@@ -1307,9 +1365,9 @@ fn waiting_asks_for_the_clock_and_a_longer_limit_for_on_browser_only() {
 fn a_set_that_withholds_the_clock_refuses_the_wait_at_start_up() {
     let fixtures = tempfile::tempdir().expect("temp dir");
     let folder = unpacked_with_worker(fixtures.path(), "ext", "no-grant");
-    let waiting = plugin(
-        checked(SessionConfig::builder().dir(&folder).wait_for_workers(true)),
-    );
+    let waiting = plugin(checked(
+        SessionConfig::builder().dir(&folder).wait_for_workers(true),
+    ));
     let grants: CapabilitySet = waiting
         .metadata()
         .capabilities
@@ -1402,7 +1460,12 @@ mod sessions {
     /// A set around a plugin that restores the session `login` kept in `dir`,
     /// and saves it when the browser closes if `save` is true.
     fn session_set(dir: &Path, save: bool) -> PluginSet {
-        let config = checked(SessionConfig::builder().session("login").session_dir(dir).save_on_close(save));
+        let config = checked(
+            SessionConfig::builder()
+                .session("login")
+                .session_dir(dir)
+                .save_on_close(save),
+        );
         let set = PluginSet::strict()
             .with(plugin(config))
             .expect("a strict set takes it");
@@ -1904,18 +1967,21 @@ mod sessions {
             assert!(!has(&none, capability), "{capability}");
         }
 
-        let restore = plugin(
-            checked(SessionConfig::builder().session("login").session_dir(&dir)),
-        )
+        let restore = plugin(checked(
+            SessionConfig::builder().session("login").session_dir(&dir),
+        ))
         .metadata();
         assert!(has(&restore, &Capability::CookiesWrite));
         assert!(has(&restore, &reads_file));
         assert!(!has(&restore, &Capability::CookiesRead));
         assert!(!has(&restore, &writes_dir));
 
-        let saving = plugin(
-            checked(SessionConfig::builder().session("login").session_dir(&dir).save_on_close(true)),
-        )
+        let saving = plugin(checked(
+            SessionConfig::builder()
+                .session("login")
+                .session_dir(&dir)
+                .save_on_close(true),
+        ))
         .metadata();
         assert!(has(&saving, &Capability::CookiesWrite));
         assert!(has(&saving, &Capability::CookiesRead));
@@ -1931,9 +1997,12 @@ mod sessions {
             (Capability::CookiesWrite, "cookies.write"),
             (Capability::CookiesRead, "cookies.read"),
         ] {
-            let saving = plugin(
-                checked(SessionConfig::builder().session("login").session_dir(&dir).save_on_close(true)),
-            );
+            let saving = plugin(checked(
+                SessionConfig::builder()
+                    .session("login")
+                    .session_dir(&dir)
+                    .save_on_close(true),
+            ));
             let grants: CapabilitySet = saving
                 .metadata()
                 .capabilities
@@ -1962,9 +2031,11 @@ mod sessions {
         assert!(meta.capabilities.covers(&expected), "{meta:?}");
 
         // A relative folder is made absolute when the plugin is built.
-        let meta = plugin(
-            checked(SessionConfig::builder().session("login").session_dir("kept")),
-        )
+        let meta = plugin(checked(
+            SessionConfig::builder()
+                .session("login")
+                .session_dir("kept"),
+        ))
         .metadata();
         let expected = Capability::HostFsRead(PathScope::Declared(vec![
             here.join("kept").join("login.json"),
@@ -2017,14 +2088,21 @@ mod sessions {
     /// A browser that can open tabs and knows the cookies of [`chrome_cookies`].
     fn signed_in_browser() -> Arc<RecordingBrowser> {
         Arc::new(
-            RecordingBrowser::builder().contexts().build()
+            RecordingBrowser::builder()
+                .contexts()
+                .build()
                 .replying("Storage.getCookies", chrome_cookies()),
         )
     }
 
     /// A set around an interactive plugin for the session `login` kept in `dir`.
     fn interactive_set(dir: &Path, message: Option<&str>) -> PluginSet {
-        let mut config = checked(SessionConfig::builder().session("login").session_dir(dir).interactive(true));
+        let mut config = checked(
+            SessionConfig::builder()
+                .session("login")
+                .session_dir(dir)
+                .interactive(true),
+        );
         if let Some(message) = message {
             config = checked(config.into_builder().pause_message(message));
         }
@@ -2225,9 +2303,9 @@ mod sessions {
         let fixtures = tempfile::tempdir().expect("temp dir");
         let dir = fixtures.path().join("sessions");
         let quiet = PluginSet::strict()
-            .with(plugin(
-                checked(SessionConfig::builder().session("login").session_dir(&dir)),
-            ))
+            .with(plugin(checked(
+                SessionConfig::builder().session("login").session_dir(&dir),
+            )))
             .expect("a strict set takes it");
         assert!(quiet.task_names().is_empty());
         assert!(quiet.task("browser").is_err());
@@ -2241,9 +2319,12 @@ mod sessions {
     fn interactive_needs_a_headed_browser_and_a_host_with_tasks() {
         let fixtures = tempfile::tempdir().expect("temp dir");
         let dir = fixtures.path().join("sessions");
-        let interactive = plugin(
-            checked(SessionConfig::builder().session("login").session_dir(&dir).interactive(true)),
-        );
+        let interactive = plugin(checked(
+            SessionConfig::builder()
+                .session("login")
+                .session_dir(&dir)
+                .interactive(true),
+        ));
         assert!(interactive.requirements().contains(Requirements::HEADFUL));
         assert!(
             interactive
@@ -2287,9 +2368,7 @@ mod sessions {
     fn the_interactive_instance_declares_the_task_and_cookie_access() {
         let fixtures = tempfile::tempdir().expect("temp dir");
         let dir = fixtures.path().join("sessions");
-        let base = || {
-            checked(SessionConfig::builder().session("login").session_dir(&dir))
-        };
+        let base = || checked(SessionConfig::builder().session("login").session_dir(&dir));
         let plain = plugin(base()).metadata();
         assert!(!plain.capabilities.covers(&Capability::Task));
 
@@ -2326,9 +2405,12 @@ mod sessions {
     fn a_set_that_withholds_the_task_refuses_interactive_at_start_up() {
         let fixtures = tempfile::tempdir().expect("temp dir");
         let dir = fixtures.path().join("sessions");
-        let interactive = plugin(
-            checked(SessionConfig::builder().session("login").session_dir(&dir).interactive(true)),
-        );
+        let interactive = plugin(checked(
+            SessionConfig::builder()
+                .session("login")
+                .session_dir(&dir)
+                .interactive(true),
+        ));
         let grants: CapabilitySet = interactive
             .metadata()
             .capabilities

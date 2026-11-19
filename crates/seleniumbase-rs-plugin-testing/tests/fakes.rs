@@ -135,12 +135,15 @@ fn without_with_contexts_the_browser_offers_none_and_failures_can_be_injected() 
             .unwrap(),
         PluginError::NotSupported(_)
     ));
-    let failing = RecordingBrowser::builder().contexts().build()
+    let failing = RecordingBrowser::builder()
+        .contexts()
+        .build()
         .failing("new_context");
     assert!(block_on(failing.new_context(ContextSettings::new())).is_err());
     assert_eq!(failing.live_contexts(), 0);
-    let ids =
-        RecordingBrowser::builder().extensions(vec![LoadedExtension::new("abc", "/tmp/ext")]).build();
+    let ids = RecordingBrowser::builder()
+        .extensions(vec![LoadedExtension::new("abc", "/tmp/ext")])
+        .build();
     assert_eq!(ids.extensions()[0].id, "abc");
 }
 
@@ -180,7 +183,9 @@ fn the_worker_query_is_recorded_and_can_fail_or_be_unsupported() {
         block_on(plain.extension_workers()),
         Err(PluginError::NotSupported(what)) if what == "extension_workers"
     ));
-    let failing = RecordingBrowser::builder().workers(vec![Vec::new()]).build()
+    let failing = RecordingBrowser::builder()
+        .workers(vec![Vec::new()])
+        .build()
         .failing("extension_workers");
     assert!(matches!(
         block_on(failing.extension_workers()),

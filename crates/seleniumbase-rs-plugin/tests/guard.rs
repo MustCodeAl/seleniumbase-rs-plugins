@@ -325,8 +325,10 @@ fn a_panic_in_on_test_end_does_not_change_the_verdict_of_the_others() {
 #[test]
 fn a_panic_is_caught_when_the_set_has_a_timer_too() {
     let log = log();
-    let set =
-        set_of([Probe::new("boomer", Mode::Panic, &log)]).into_builder().timer(Arc::new(ManualTimer::new())).build();
+    let set = set_of([Probe::new("boomer", Mode::Panic, &log)])
+        .into_builder()
+        .timer(Arc::new(ManualTimer::new()))
+        .build();
 
     let error = block_on(set.on_page_created(&RecordingPage::new())).unwrap_err();
 
@@ -1089,7 +1091,10 @@ fn a_plugin_may_ask_for_another_limit_but_not_beyond_four_times_the_default() {
 fn on_request_that_takes_two_seconds_fails_the_request() {
     let log = log();
     let timer = Arc::new(ManualTimer::new());
-    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::NetIntercept)]).into_builder().timer(timer.clone()).build();
+    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::NetIntercept)])
+        .into_builder()
+        .timer(timer.clone())
+        .build();
     let request = request();
 
     let mut decision = pin!(set.on_request(&request));
@@ -1110,7 +1115,10 @@ fn on_request_that_takes_two_seconds_fails_the_request() {
 #[test]
 fn a_fast_on_request_is_not_cut_short_by_the_timer() {
     let log = log();
-    let set = set_of([Probe::new("quick", Mode::Quiet, &log).with(Capability::NetIntercept)]).into_builder().timer(Arc::new(ManualTimer::new())).build();
+    let set = set_of([Probe::new("quick", Mode::Quiet, &log).with(Capability::NetIntercept)])
+        .into_builder()
+        .timer(Arc::new(ManualTimer::new()))
+        .build();
 
     assert_eq!(
         block_on(set.on_request(&request())),
@@ -1122,7 +1130,10 @@ fn a_fast_on_request_is_not_cut_short_by_the_timer() {
 fn a_slow_before_navigate_times_out_after_five_seconds() {
     let log = log();
     let timer = Arc::new(ManualTimer::new());
-    let set = set_of([Probe::new("slow", Mode::Hang, &log)]).into_builder().timer(timer.clone()).build();
+    let set = set_of([Probe::new("slow", Mode::Hang, &log)])
+        .into_builder()
+        .timer(timer.clone())
+        .build();
     let page = RecordingPage::new();
     let navigation = Navigation::program("https://a.test/");
 
@@ -1142,7 +1153,10 @@ fn a_slow_before_navigate_times_out_after_five_seconds() {
 fn a_slow_on_test_end_times_out_after_thirty_seconds_and_keeps_the_verdict() {
     let log = log();
     let timer = Arc::new(ManualTimer::new());
-    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::TestHooks)]).into_builder().timer(timer.clone()).build();
+    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::TestHooks)])
+        .into_builder()
+        .timer(timer.clone())
+        .build();
     let test = TestInfo::new("t");
 
     let mut result = pin!(set.on_test_end(&test, &TestOutcome::Passed, None));
@@ -1276,7 +1290,9 @@ mod host_queries {
     fn a_plugin_that_loads_extensions_gets_the_hosts_workers() {
         let (asker, seen) = Asker::new(vec![Capability::LaunchExtensions]);
         let set = PluginSet::new().with(asker).unwrap();
-        let browser = RecordingBrowser::builder().workers(vec![vec![worker()]]).build();
+        let browser = RecordingBrowser::builder()
+            .workers(vec![vec![worker()]])
+            .build();
 
         block_on(set.on_browser(&browser)).unwrap();
 
@@ -1292,7 +1308,9 @@ mod host_queries {
     fn a_plugin_that_does_not_load_extensions_is_refused_before_the_host_is_asked() {
         let (asker, seen) = Asker::new(Vec::new());
         let set = PluginSet::new().with(asker).unwrap();
-        let browser = RecordingBrowser::builder().workers(vec![vec![worker()]]).build();
+        let browser = RecordingBrowser::builder()
+            .workers(vec![vec![worker()]])
+            .build();
 
         block_on(set.on_browser(&browser)).unwrap();
 
@@ -1326,7 +1344,9 @@ mod host_queries {
 
     #[test]
     fn the_snapshots_of_the_fake_come_one_per_call_and_the_last_repeats() {
-        let browser = RecordingBrowser::builder().workers(vec![Vec::new(), vec![worker()]]).build();
+        let browser = RecordingBrowser::builder()
+            .workers(vec![Vec::new(), vec![worker()]])
+            .build();
         assert!(block_on(browser.extension_workers()).unwrap().is_empty());
         assert_eq!(block_on(browser.extension_workers()).unwrap(), [worker()]);
         assert_eq!(block_on(browser.extension_workers()).unwrap(), [worker()]);
@@ -1339,7 +1359,10 @@ mod host_queries {
         let timer = Arc::new(ManualTimer::new());
         let set = PluginSet::new()
             .with(asker)
-            .unwrap().into_builder().timer(timer.clone()).build();
+            .unwrap()
+            .into_builder()
+            .timer(timer.clone())
+            .build();
 
         block_on(set.on_browser(&RecordingBrowser::new())).unwrap();
 
@@ -1361,7 +1384,10 @@ mod host_queries {
         let (asker, seen) = Asker::new(Vec::new());
         let set = PluginSet::new()
             .with(asker)
-            .unwrap().into_builder().timer(Arc::new(ManualTimer::new())).build();
+            .unwrap()
+            .into_builder()
+            .timer(Arc::new(ManualTimer::new()))
+            .build();
         block_on(set.on_browser(&RecordingBrowser::new())).unwrap();
         assert!(seen.lock().unwrap().clock.as_ref().unwrap().is_none());
 

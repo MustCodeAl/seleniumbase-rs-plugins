@@ -409,10 +409,7 @@ impl RecordingBrowserBuilder {
     /// [`PluginError::NotSupported`], as a host without the query does.
     #[must_use]
     pub fn workers(mut self, snapshots: Vec<Vec<ExtensionWorker>>) -> Self {
-        self.browser.workers = Mutex::new(WorkerScript {
-            snapshots,
-            next: 0,
-        });
+        self.browser.workers = Mutex::new(WorkerScript { snapshots, next: 0 });
         self
     }
 

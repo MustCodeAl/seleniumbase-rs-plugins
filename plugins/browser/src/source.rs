@@ -231,7 +231,11 @@ mod tests {
         let bad = fixtures.path().join("bad.zip");
         fs::write(&bad, b"PK\x03\x04 cut short").expect("write");
 
-        let config = SessionConfig::builder().zip(&good).zip(&bad).build().expect("valid options");
+        let config = SessionConfig::builder()
+            .zip(&good)
+            .zip(&bad)
+            .build()
+            .expect("valid options");
         let error = prepare(&config, temp_root.path()).expect_err("the second archive is bad");
         assert!(error.to_string().contains("bad.zip"), "{error}");
         assert_eq!(
@@ -248,8 +252,14 @@ mod tests {
         let zip = fixtures.path().join("ext.zip");
         fs::write(&zip, zip_with(&[("manifest.json", MANIFEST)])).expect("write");
 
-        let prepared = prepare(&SessionConfig::builder().zip(&zip).build().expect("valid options"), temp_root.path())
-            .expect("a good archive");
+        let prepared = prepare(
+            &SessionConfig::builder()
+                .zip(&zip)
+                .build()
+                .expect("valid options"),
+            temp_root.path(),
+        )
+        .expect("a good archive");
         assert_eq!(entries(temp_root.path()), 1);
         assert_eq!(prepared.folders.len(), 1);
         assert!(prepared.folders[0].starts_with(fs::canonicalize(temp_root.path()).expect("root")));
@@ -263,8 +273,14 @@ mod tests {
         let temp_root = tempfile::tempdir().expect("temp dir");
         let zip = fixtures.path().join("empty.zip");
         fs::write(&zip, zip_with(&[])).expect("write");
-        let error = prepare(&SessionConfig::builder().zip(&zip).build().expect("valid options"), temp_root.path())
-            .expect_err("nothing to load");
+        let error = prepare(
+            &SessionConfig::builder()
+                .zip(&zip)
+                .build()
+                .expect("valid options"),
+            temp_root.path(),
+        )
+        .expect_err("nothing to load");
         assert!(error.to_string().contains("manifest.json"), "{error}");
         assert_eq!(entries(temp_root.path()), 0);
     }

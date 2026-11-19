@@ -721,7 +721,11 @@ mod tests {
     #[test]
     fn the_file_is_always_inside_its_folder() {
         for name in ["a", "a.json", "a..b", "x-y_z.1"] {
-            let config = SessionConfig::builder().session(name).session_dir("/tmp/sessions/").build().expect("a valid session");
+            let config = SessionConfig::builder()
+                .session(name)
+                .session_dir("/tmp/sessions/")
+                .build()
+                .expect("a valid session");
             let store = Store::from_config(&config)
                 .expect("a store")
                 .expect("a session");

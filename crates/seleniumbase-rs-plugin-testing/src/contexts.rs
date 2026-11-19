@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use seleniumbase_rs_plugin::{
-    ContextHandle, ContextId, ContextSettings, Engine, PageHandle, PageId,
-    PluginError, Result, async_trait,
+    ContextHandle, ContextId, ContextSettings, Engine, PageHandle, PageId, PluginError, Result,
+    async_trait,
 };
 use serde_json::Value;
 
@@ -112,7 +112,10 @@ impl ContextHandle for FakeContext {
         self.recorder.answer("new_page")?;
         let serial = self.world.open_page();
         self.open_pages.fetch_add(1, Ordering::SeqCst);
-        let page = RecordingPage::builder().id(PageId::new(format!("{}-page-{serial}", self.id))).build().in_context(self.id.clone());
+        let page = RecordingPage::builder()
+            .id(PageId::new(format!("{}-page-{serial}", self.id)))
+            .build()
+            .in_context(self.id.clone());
         self.pages
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -211,7 +214,6 @@ impl PageHandle for CountedPage {
 }
 
 impl RecordingBrowser {
-
     /// Makes `method` (`"new_context"`, `"new_page"`, `"dispose"`, `"extension_workers"` or a protocol
     /// command) answer with an error.
     #[must_use]
@@ -318,7 +320,9 @@ impl RecordingBrowser {
             .as_ref()
             .ok_or_else(|| PluginError::unsupported("new_page"))?;
         let serial = world.open_page();
-        let page = RecordingPage::builder().id(PageId::new(format!("page-{serial}"))).build();
+        let page = RecordingPage::builder()
+            .id(PageId::new(format!("page-{serial}")))
+            .build();
         self.made_pages
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
