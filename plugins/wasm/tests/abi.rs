@@ -21,7 +21,7 @@ fn refused(module: &Module) -> WasmError {
 }
 
 fn small_fuel() -> Limits {
-    Limits::default().with_fuel_per_call(1_000_000)
+    Limits::builder().fuel_per_call(1_000_000).build()
 }
 
 fn chromium() -> LaunchContext {
@@ -318,11 +318,11 @@ fn the_text_format_is_not_accepted() {
 #[test]
 fn a_module_larger_than_the_limit_is_refused() {
     let wasm = Module::named("big").build();
-    let limits = Limits::default().with_max_module_bytes(wasm.len() - 1);
+    let limits = Limits::builder().max_module_bytes(wasm.len() - 1).build();
     let error = WasmPlugin::from_bytes_with(&wasm, &limits).unwrap_err();
     assert!(matches!(error, WasmError::ModuleTooLarge { .. }), "{error}");
     // One byte more is fine.
-    let limits = Limits::default().with_max_module_bytes(wasm.len());
+    let limits = Limits::builder().max_module_bytes(wasm.len()).build();
     assert!(WasmPlugin::from_bytes_with(&wasm, &limits).is_ok());
 }
 
@@ -364,7 +364,7 @@ fn a_module_that_starts_with_too_much_memory_is_refused() {
     assert!(matches!(error, WasmError::MemoryTooLarge { .. }), "{error}");
 
     // The same module is fine when the limit allows it.
-    let limits = Limits::default().with_max_memory_bytes(1000 * 65_536);
+    let limits = Limits::builder().max_memory_bytes(1000 * 65_536).build();
     let error = WasmPlugin::from_bytes_with(&module.build(), &limits).unwrap_err();
     assert!(
         !matches!(error, WasmError::MemoryTooLarge { .. }),
@@ -559,7 +559,7 @@ fn spender(export: &str, result: &str, constant: &str) -> String {
 }
 
 fn loads_with_fuel(module: &Module, fuel: u64) -> bool {
-    let limits = Limits::default().with_fuel_per_call(fuel);
+    let limits = Limits::builder().fuel_per_call(fuel).build();
     WasmPlugin::from_bytes_with(&module.build(), &limits).is_ok()
 }
 
@@ -688,7 +688,7 @@ fn a_length_over_the_limit_is_refused_before_the_memory_is_read() {
 
     let long = format!("\"{}\"", "a".repeat(40));
     let module = Module::bare().version(1).json("sbrs_name", &long);
-    let limits = Limits::default().with_max_value_bytes(16);
+    let limits = Limits::builder().max_value_bytes(16).build();
     let error = WasmPlugin::from_bytes_with(&module.build(), &limits).unwrap_err();
     assert!(matches!(error, WasmError::TooLong { .. }), "{error}");
 }
@@ -997,7 +997,7 @@ fn a_file_over_the_limit_is_refused_without_being_read_whole() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("big.wasm");
     std::fs::write(&path, vec![0u8; 1024 * 1024]).unwrap();
-    let limits = Limits::default().with_max_module_bytes(1024);
+    let limits = Limits::builder().max_module_bytes(1024).build();
     let error = WasmPlugin::from_file_with(&path, &limits).unwrap_err();
     assert!(matches!(error, WasmError::ModuleTooLarge { .. }), "{error}");
 }

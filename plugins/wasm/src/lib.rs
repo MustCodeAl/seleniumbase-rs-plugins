@@ -20,7 +20,7 @@ use serde_json::json;
 
 pub use abi::{ABI_VERSION, FORBIDDEN_FLAGS};
 pub use error::WasmError;
-pub use limits::Limits;
+pub use limits::{Limits, LimitsBuilder};
 
 /// A plugin written in WebAssembly.
 ///
