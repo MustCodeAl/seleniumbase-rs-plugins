@@ -326,7 +326,7 @@ fn a_panic_in_on_test_end_does_not_change_the_verdict_of_the_others() {
 fn a_panic_is_caught_when_the_set_has_a_timer_too() {
     let log = log();
     let set =
-        set_of([Probe::new("boomer", Mode::Panic, &log)]).with_timer(Arc::new(ManualTimer::new()));
+        set_of([Probe::new("boomer", Mode::Panic, &log)]).into_builder().timer(Arc::new(ManualTimer::new())).build();
 
     let error = block_on(set.on_page_created(&RecordingPage::new())).unwrap_err();
 
@@ -1089,8 +1089,7 @@ fn a_plugin_may_ask_for_another_limit_but_not_beyond_four_times_the_default() {
 fn on_request_that_takes_two_seconds_fails_the_request() {
     let log = log();
     let timer = Arc::new(ManualTimer::new());
-    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::NetIntercept)])
-        .with_timer(timer.clone());
+    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::NetIntercept)]).into_builder().timer(timer.clone()).build();
     let request = request();
 
     let mut decision = pin!(set.on_request(&request));
@@ -1111,8 +1110,7 @@ fn on_request_that_takes_two_seconds_fails_the_request() {
 #[test]
 fn a_fast_on_request_is_not_cut_short_by_the_timer() {
     let log = log();
-    let set = set_of([Probe::new("quick", Mode::Quiet, &log).with(Capability::NetIntercept)])
-        .with_timer(Arc::new(ManualTimer::new()));
+    let set = set_of([Probe::new("quick", Mode::Quiet, &log).with(Capability::NetIntercept)]).into_builder().timer(Arc::new(ManualTimer::new())).build();
 
     assert_eq!(
         block_on(set.on_request(&request())),
@@ -1124,7 +1122,7 @@ fn a_fast_on_request_is_not_cut_short_by_the_timer() {
 fn a_slow_before_navigate_times_out_after_five_seconds() {
     let log = log();
     let timer = Arc::new(ManualTimer::new());
-    let set = set_of([Probe::new("slow", Mode::Hang, &log)]).with_timer(timer.clone());
+    let set = set_of([Probe::new("slow", Mode::Hang, &log)]).into_builder().timer(timer.clone()).build();
     let page = RecordingPage::new();
     let navigation = Navigation::program("https://a.test/");
 
@@ -1144,8 +1142,7 @@ fn a_slow_before_navigate_times_out_after_five_seconds() {
 fn a_slow_on_test_end_times_out_after_thirty_seconds_and_keeps_the_verdict() {
     let log = log();
     let timer = Arc::new(ManualTimer::new());
-    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::TestHooks)])
-        .with_timer(timer.clone());
+    let set = set_of([Probe::new("slow", Mode::Hang, &log).with(Capability::TestHooks)]).into_builder().timer(timer.clone()).build();
     let test = TestInfo::new("t");
 
     let mut result = pin!(set.on_test_end(&test, &TestOutcome::Passed, None));
@@ -1173,7 +1170,7 @@ fn the_other_hooks_get_ten_seconds_and_a_plugin_can_lower_its_own_limit() {
         (Probe::new("impatient", Mode::Hang, &log).budgets(asks), 1),
     ] {
         let timer = Arc::new(ManualTimer::new());
-        let set = set_of([probe]).with_timer(timer.clone());
+        let set = set_of([probe]).into_builder().timer(timer.clone()).build();
         let page = RecordingPage::new();
 
         let mut result = pin!(set.on_page_created(&page));
@@ -1342,8 +1339,7 @@ mod host_queries {
         let timer = Arc::new(ManualTimer::new());
         let set = PluginSet::new()
             .with(asker)
-            .unwrap()
-            .with_timer(timer.clone());
+            .unwrap().into_builder().timer(timer.clone()).build();
 
         block_on(set.on_browser(&RecordingBrowser::new())).unwrap();
 
@@ -1365,8 +1361,7 @@ mod host_queries {
         let (asker, seen) = Asker::new(Vec::new());
         let set = PluginSet::new()
             .with(asker)
-            .unwrap()
-            .with_timer(Arc::new(ManualTimer::new()));
+            .unwrap().into_builder().timer(Arc::new(ManualTimer::new())).build();
         block_on(set.on_browser(&RecordingBrowser::new())).unwrap();
         assert!(seen.lock().unwrap().clock.as_ref().unwrap().is_none());
 

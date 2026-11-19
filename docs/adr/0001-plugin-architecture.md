@@ -241,7 +241,7 @@ pub struct BrowserId(Arc<str>); pub struct PageId(Arc<str>); pub struct ContextI
 How the rules are carried out:
 
 - **Panics.** Each hook future is polled inside a small `catch_unwind` wrapper in the API crate, with no new dependency. A panic becomes `PluginError::Panicked { plugin, hook }`.
-- **Budgets.** `PluginSet::with_timer(Arc<dyn Timer>)` keeps the API crate free of any runtime: core passes a tokio sleeper, and tests pass a `ManualTimer`. Without a timer there are no timeouts, as today. Plugins can override the defaults in `Metadata::budgets`, capped by the set's maxima.
+- **Budgets.** `PluginSetBuilder::timer` keeps the API crate free of any runtime: core passes a tokio sleeper, and tests pass a `ManualTimer`. Without a timer there are no timeouts, as today. Plugins can override the defaults in `Metadata::budgets`, capped by the set's maxima.
 
 | Hook | Default budget |
 |---|---|

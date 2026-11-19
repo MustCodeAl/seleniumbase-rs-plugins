@@ -1027,7 +1027,7 @@ fn launched_set(
         .with(plugin(config))
         .expect("a strict set takes it");
     if timer {
-        set = set.with_timer(manual.clone());
+        set = set.into_builder().timer(manual.clone()).build();
     }
     set.check(&context(true))
         .expect("the grants cover the options");

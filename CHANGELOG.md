@@ -275,7 +275,7 @@ version; it stays 0.1.x until the next release.
   read `[redacted]` without `net.sensitive`; response bodies need `net.bodies`
   and a `max_body`; a changed context proxy needs `launch.proxy` and honours
   `Seals::CONTEXT_PROXY`. `check` also refuses a `network()` or `task()` the
-  plugin has no grant for. `Timer`, `Clock` and `PluginSet::with_timer` give
+  plugin has no grant for. `Timer`, `Clock` and `PluginSetBuilder::timer` give
   tasks sleeps and time limits without a runtime. `config::options` reads typed
   options (`unknown option` errors name the plugin). A plugin written for 0.1.0
   compiles and behaves as before (`tests/legacy.rs`).
@@ -288,7 +288,7 @@ version; it stays 0.1.x until the next release.
   in any hook is caught and becomes `PluginError::Panicked { plugin, hook }`
   (the dispatchers of `before_launch`, `on_browser`, `on_page_created` and
   `on_close` now go through the same `run_hook` as the new hooks). A set that
-  has a timer (`PluginSet::with_timer`) cuts every hook off at its limit with
+  has a timer (`PluginSetBuilder::timer`) cuts every hook off at its limit with
   `PluginError::Timeout`: `before_navigate` 5 s, `on_request` 2 s (the request
   is blocked), `on_test_end` and `before_launch` 30 s, every other hook 10 s.
   `Metadata::budget` can ask for another limit per hook (`Budgets` gained

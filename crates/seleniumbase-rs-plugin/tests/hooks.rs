@@ -707,7 +707,7 @@ fn a_set_knows_its_timer_only_when_given_one() {
     let set = PluginSet::new();
     assert!(set.clock().is_none());
     let timer = Arc::new(seleniumbase_rs_plugin_testing::ManualTimer::new());
-    let set = set.with_timer(timer.clone());
+    let set = set.into_builder().timer(timer.clone()).build();
     let clock = set.clock().unwrap();
     timer.advance(Duration::from_secs(2));
     assert_eq!(clock.now_ms(), Timer::now_ms(timer.as_ref()));

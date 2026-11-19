@@ -1,7 +1,7 @@
 //! Time for plugins: the [`Timer`] a host provides and the [`Clock`] built on it.
 //!
 //! The API crate has no runtime. seleniumbase-rs gives the set a timer that
-//! sleeps on tokio ([`PluginSet::with_timer`](crate::PluginSet::with_timer));
+//! sleeps on tokio ([`PluginSetBuilder::timer`](crate::PluginSetBuilder::timer));
 //! tests give it a manual one that moves when the test says so
 //! (`ManualTimer` in `seleniumbase-rs-plugin-testing`).
 

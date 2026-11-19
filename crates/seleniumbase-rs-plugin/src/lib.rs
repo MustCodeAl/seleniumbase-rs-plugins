@@ -622,7 +622,7 @@ pub trait BrowserHandle: Send + Sync {
     /// [`Plugin::on_browser`], which gets no [`TaskContext`]. `None` when the
     /// host has none. [`Guarded`] gives it only to a plugin that holds
     /// [`Capability::Clock`], and it is the clock of the plugin set
-    /// ([`PluginSet::with_timer`]) when the set has a timer.
+    /// ([`PluginSetBuilder::timer`]) when the set has a timer.
     fn clock(&self) -> Option<Clock> {
         None
     }
@@ -955,7 +955,7 @@ fn default_grants(meta: &Metadata) -> CapabilitySet {
 pub struct PluginSet {
     entries: Vec<Entry>,
     strict: bool,
-    /// For the time budgets of hooks and for tasks; see [`PluginSet::with_timer`].
+    /// For the time budgets of hooks and for tasks; see [`PluginSetBuilder::timer`].
     timer: Option<Arc<dyn Timer>>,
     /// The run order, worked out on first use and thrown away when a plugin is
     /// added: hooks like `on_request` run for every request.
@@ -1499,18 +1499,66 @@ fn verify_launch(
     Ok(())
 }
 
-/// What the set needs from a host and from a plugin's grants to run hooks.
-impl PluginSet {
+/// Builds a [`PluginSet`]. [`PluginSet::builder`] starts empty and not strict;
+/// [`PluginSet::into_builder`] starts from a set that already exists.
+/// [`build`](Self::build) does not fail: the plugins are already in the set.
+#[must_use = "a builder does nothing until `build` is called"]
+pub struct PluginSetBuilder {
+    set: PluginSet,
+}
+
+impl fmt::Debug for PluginSetBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PluginSetBuilder")
+            .field("plugins", &self.set.names())
+            .field("strict", &self.set.strict)
+            .field("has_timer", &self.set.timer.is_some())
+            .finish()
+    }
+}
+
+impl Default for PluginSetBuilder {
+    fn default() -> Self {
+        Self {
+            set: PluginSet::default(),
+        }
+    }
+}
+
+impl PluginSetBuilder {
     /// Gives the set a timer. Tasks get a [`Clock`] over it
-    /// ([`clock`](Self::clock)), and the time limits of the hooks ([`Budgets`])
+    /// ([`PluginSet::clock`]), and the time limits of the hooks ([`Budgets`])
     /// apply only to a set that has one: without a timer nothing times out.
     #[must_use]
-    pub fn with_timer(mut self, timer: Arc<dyn Timer>) -> Self {
-        self.timer = Some(timer);
+    pub fn timer(mut self, timer: Arc<dyn Timer>) -> Self {
+        self.set.timer = Some(timer);
         self
     }
 
-    /// A clock over the timer given to [`with_timer`](Self::with_timer), if any.
+    /// The set, timer included. This does not fail.
+    #[must_use]
+    pub fn build(self) -> PluginSet {
+        self.set
+    }
+}
+
+/// What the set needs from a host and from a plugin's grants to run hooks.
+impl PluginSet {
+    /// An empty builder: no plugins, and not strict.
+    /// [`into_builder`](Self::into_builder) starts from a set that already exists.
+    /// Give it a timer with [`PluginSetBuilder::timer`].
+    #[must_use]
+    pub fn builder() -> PluginSetBuilder {
+        PluginSetBuilder::default()
+    }
+
+    /// A builder that starts from this set.
+    #[must_use]
+    pub fn into_builder(self) -> PluginSetBuilder {
+        PluginSetBuilder { set: self }
+    }
+
+    /// A clock over the timer given to [`PluginSetBuilder::timer`], if any.
     #[must_use]
     pub fn clock(&self) -> Option<Clock> {
         self.timer.clone().map(Clock::new)
