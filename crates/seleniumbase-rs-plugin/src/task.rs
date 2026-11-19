@@ -99,8 +99,9 @@ impl<'a> TaskContext<'a> {
 
 impl fmt::Debug for TaskContext<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The input can hold a password or a cookie, and the handles are trait objects.
         f.debug_struct("TaskContext")
-            .field("input", &self.input)
+            .field("plugins", &self.plugins.names())
             .finish_non_exhaustive()
     }
 }
