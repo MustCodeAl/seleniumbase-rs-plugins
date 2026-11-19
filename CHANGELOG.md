@@ -309,6 +309,20 @@ version; it stays 0.1.x until the next release.
 
 ### Changed
 
+- Breaking, before 1.0: setters that only stored a field moved off `with_*`.
+  `SessionConfigBuilder` (`SessionConfig::builder` / `into_builder`; `zip`,
+  `dir`, `wait_for_workers`, `worker_timeout_secs`, `session`,
+  `save_on_close`, `session_dir`, `interactive`, `pause_message`; `build`
+  runs the old checks and returns `Result`). `LimitsBuilder` (the four
+  limits; `build` returns `Limits`, and `0` is still allowed).
+  `PluginSet::with_timer` is `PluginSetBuilder::timer`
+  (`set.into_builder().timer(t).build()`); `with`, `with_shared`,
+  `with_trusted`, `with_grants` and `with_grants_shared` stay.
+  `RecordingPageBuilder::id` and
+  `RecordingBrowserBuilder::{contexts, extensions, workers, clock}`;
+  `evaluating`, `at`, `in_context`, `failing` and `replying` stay on the
+  fakes. `TaskContext`'s `Debug` no longer prints the task input.
+
 - The crates are at version 0.1.3.
 - `HostInfo` for WebDriver hosts no longer offers `Task` and `TestHooks`, so
   `PluginSet::check_with` refuses a plugin that needs them there (they were
