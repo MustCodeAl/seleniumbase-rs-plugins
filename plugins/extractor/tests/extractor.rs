@@ -633,3 +633,27 @@ fn the_task_stops_when_a_capability_is_missing_and_still_closes_its_tab() {
     assert!(lines.is_empty());
     assert!(browser.page.calls().contains(&Call::Close));
 }
+
+#[test]
+fn the_task_extracts_markdown_and_waits_for_selector() {
+    let set = PluginSet::new().with(extractor()).unwrap();
+    let page = RecordingPage::new()
+        .evaluating(EXTRACT, read(json!([]), Value::Null))
+        .evaluating(
+            "const article",
+            json!("# Headline\n\nArticle body content."),
+        );
+    let runner = set.job_runner("extractor").unwrap();
+    let job = json!({
+        "url": "https://a.test/article",
+        "wait_for": "article",
+        "scroll_y": true,
+        "markdown": true,
+    });
+    let result = block_on(runner.run_job(&page, &job)).unwrap();
+    assert_eq!(result["markdown"], "# Headline\n\nArticle body content.");
+    assert!(
+        page.calls()
+            .contains(&Call::Navigate("https://a.test/article".into()))
+    );
+}

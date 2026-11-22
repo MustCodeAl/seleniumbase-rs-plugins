@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use seleniumbase_rs_plugin::{PluginError, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// The script that fetches one URL, as a function over its request.
@@ -17,23 +17,53 @@ pub const MAX_URLS: usize = 10_000;
 pub const MAX_DELAY_MS: u64 = 60_000;
 
 /// One job for [`JobRunner::run_job`](seleniumbase_rs_plugin::JobRunner::run_job).
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Job {
-    url: String,
+pub struct Job {
+    pub url: String,
     /// At most this many bytes of the body; never more than `max_body_bytes`.
-    max_bytes: Option<usize>,
+    #[serde(default)]
+    pub max_bytes: Option<usize>,
+    /// Mode: `"fetch"` (default, in-page JavaScript fetch) or `"navigate"`
+    /// (full browser navigation and DOM rendering).
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// Wait for a CSS selector or XPath to appear before returning (for dynamic SPAs).
+    #[serde(default)]
+    pub wait_for: Option<String>,
+    /// Wait delay in milliseconds (e.g. for animations or network idle).
+    #[serde(default)]
+    pub wait_ms: Option<u64>,
+    /// Auto-scroll down the page to trigger lazy loading of assets.
+    #[serde(default)]
+    pub scroll_y: Option<bool>,
+    /// Capture screenshot of the fetched page as base64 PNG.
+    #[serde(default)]
+    pub screenshot: Option<bool>,
+    /// Full JS execution / HTML rendering (default true in navigate mode).
+    #[serde(default)]
+    pub js_render: Option<bool>,
 }
 
 impl Job {
-    pub(crate) fn parse(job: &Value) -> Result<Self> {
+    pub fn parse(job: &Value) -> Result<Self> {
         serde_json::from_value(job.clone())
             .map_err(|error| PluginError::Config(format!("fetcher: bad job: {error}")))
     }
 
+    /// Whether this job needs full browser navigation and DOM rendering rather
+    /// than an in-page `fetch()`.
+    #[must_use]
+    pub fn is_navigate(&self) -> bool {
+        self.mode.as_deref() == Some("navigate")
+            || self.wait_for.is_some()
+            || self.scroll_y == Some(true)
+            || self.screenshot == Some(true)
+    }
+
     /// The expression that fetches the URL. Both values travel as a JSON
     /// literal, so a URL cannot step out of its string.
-    pub(crate) fn script(&self, max_body_bytes: usize) -> Result<String> {
+    pub fn script(&self, max_body_bytes: usize) -> Result<String> {
         check_url(&self.url)?;
         let max = self
             .max_bytes
@@ -52,22 +82,30 @@ pub(crate) fn read_reply(reply: &Value) -> Result<Value> {
             PluginError::other(format!("fetcher: unexpected reply from the page: {reply}"))
         })?;
     let mut out = serde_json::Map::new();
+    for key in ["url", "status", "mime", "text", "truncated", "screenshot"] {
+        if let Some(val) = object.get(key) {
+            out.insert(key.to_owned(), val.clone());
+        }
+    }
+    // Guarantee required fields
     for key in ["url", "status", "mime", "text", "truncated"] {
-        out.insert(
-            key.to_owned(),
-            object.get(key).cloned().unwrap_or(Value::Null),
-        );
+        out.entry(key.to_owned()).or_insert(Value::Null);
     }
     Ok(Value::Object(out))
 }
 
-/// The task's input: `{"urls": [...], "delay_ms": 0, "warm_up": true}`.
+/// The task's input: `{"urls": [...], "delay_ms": 0, "warm_up": true, "mode": "fetch"}`.
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct TaskInput {
     pub(crate) urls: Vec<String>,
     delay_ms: u64,
     pub(crate) warm_up: bool,
+    pub(crate) mode: Option<String>,
+    pub(crate) wait_for: Option<String>,
+    pub(crate) wait_ms: Option<u64>,
+    pub(crate) scroll_y: Option<bool>,
+    pub(crate) screenshot: Option<bool>,
 }
 
 impl Default for TaskInput {
@@ -76,6 +114,11 @@ impl Default for TaskInput {
             urls: Vec::new(),
             delay_ms: 0,
             warm_up: true,
+            mode: None,
+            wait_for: None,
+            wait_ms: None,
+            scroll_y: None,
+            screenshot: None,
         }
     }
 }
@@ -104,6 +147,20 @@ impl TaskInput {
 
     pub(crate) fn delay(&self) -> Duration {
         Duration::from_millis(self.delay_ms)
+    }
+
+    /// Converts a URL in the task to a full [`Job`].
+    pub(crate) fn to_job(&self, url: &str) -> Job {
+        Job {
+            url: url.to_owned(),
+            max_bytes: None,
+            mode: self.mode.clone(),
+            wait_for: self.wait_for.clone(),
+            wait_ms: self.wait_ms,
+            scroll_y: self.scroll_y,
+            screenshot: self.screenshot,
+            js_render: None,
+        }
     }
 }
 
@@ -137,7 +194,7 @@ pub(crate) fn origin(url: &str) -> Result<String> {
     ))
 }
 
-fn check_url(url: &str) -> Result<()> {
+pub(crate) fn check_url(url: &str) -> Result<()> {
     origin(url).map(drop)
 }
 
@@ -171,5 +228,23 @@ mod tests {
         ] {
             assert!(origin(url).is_err(), "{url}");
         }
+    }
+
+    #[test]
+    fn job_parses_navigate_mode_and_options() {
+        let job = Job::parse(&json!({
+            "url": "https://example.com/shop",
+            "mode": "navigate",
+            "wait_for": "#products",
+            "scroll_y": true,
+            "screenshot": true,
+            "wait_ms": 500
+        }))
+        .unwrap();
+        assert!(job.is_navigate());
+        assert_eq!(job.wait_for.as_deref(), Some("#products"));
+        assert_eq!(job.scroll_y, Some(true));
+        assert_eq!(job.screenshot, Some(true));
+        assert_eq!(job.wait_ms, Some(500));
     }
 }

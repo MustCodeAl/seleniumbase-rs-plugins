@@ -668,3 +668,28 @@ fn a_future_that_is_not_polled_does_nothing() {
     drop(future);
     assert_eq!(browser.opened.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn job_runner_fetches_with_navigate_mode_and_renders_dom() {
+    let set = set_with(fetcher(json!({})));
+    let runner = set.job_runner("fetcher").unwrap();
+    let page = RecordingPage::new().evaluating(
+        "document.documentElement.outerHTML",
+        json!("<html><body><div id=\"products\">Sample Products</div></body></html>"),
+    );
+    let job = json!({
+        "url": "https://a.test/shop",
+        "mode": "navigate",
+        "wait_for": "#products",
+        "scroll_y": true,
+    });
+    let reply = block_on(runner.run_job(&page, &job)).unwrap();
+    assert_eq!(reply["status"], 200);
+    assert_eq!(reply["mime"], "text/html");
+    assert!(reply["text"].as_str().unwrap().contains("Sample Products"));
+    assert_eq!(reply["truncated"], false);
+    assert!(
+        page.calls()
+            .contains(&Call::Navigate("https://a.test/shop".into()))
+    );
+}

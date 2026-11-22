@@ -65,6 +65,14 @@ pub struct Request {
     pub tables: bool,
     /// Also return its title, description, Open Graph and canonical data.
     pub meta: bool,
+    /// Wait for a CSS selector or XPath to appear before extracting.
+    pub wait_for: Option<String>,
+    /// Wait delay in milliseconds before extracting.
+    pub wait_ms: Option<u64>,
+    /// Auto-scroll down the page to trigger lazy loading.
+    pub scroll_y: bool,
+    /// Also return the main content of the page as clean Markdown.
+    pub markdown: bool,
 }
 
 /// What to do about the records of a page.
@@ -93,7 +101,7 @@ impl Request {
         if self.item.is_some() {
             return Err(bad("`item` needs a `select` map"));
         }
-        let wants_page = self.text || self.links || self.tables || self.meta;
+        let wants_page = self.text || self.links || self.tables || self.meta || self.markdown;
         Ok(match self.discover {
             Some(true) => Plan::Discover(self.source),
             Some(false) => Plan::Nothing,
@@ -109,6 +117,7 @@ impl Request {
             "links": self.links,
             "tables": self.tables,
             "meta": self.meta,
+            "markdown": self.markdown,
         })
     }
 

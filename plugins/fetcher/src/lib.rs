@@ -71,10 +71,10 @@ use serde_json::{Value, json};
 
 pub use capture::Captured;
 pub use config::{FetcherConfig, MAX_BODY_LIMIT, MAX_CAPTURES_LIMIT, MAX_HEADERS};
-pub use job::{MAX_DELAY_MS, MAX_URLS};
+pub use job::{Job, MAX_DELAY_MS, MAX_URLS};
 
 use capture::{CaptureLog, now_ms};
-use job::{Job, TaskInput, origin, read_reply};
+use job::{TaskInput, check_url, origin, read_reply};
 
 /// The name the plugin is enabled by.
 const NAME: &str = "fetcher";
@@ -164,9 +164,84 @@ impl Fetcher {
 
     /// Fetches the URL of `job` in `page`.
     async fn fetch(&self, page: &dyn PageHandle, job: &Job) -> Result<Value> {
-        let script = job.script(self.config.max_body_bytes)?;
-        let reply = page.evaluate(&script).await?;
-        read_reply(&reply)
+        if job.is_navigate() {
+            self.fetch_navigate(page, job).await
+        } else {
+            let script = job.script(self.config.max_body_bytes)?;
+            let reply = page.evaluate(&script).await?;
+            read_reply(&reply)
+        }
+    }
+
+    /// Fetches by navigating the page, waiting for dynamic DOM hydration / selector,
+    /// scrolling, and capturing the rendered outer HTML and optional screenshot.
+    async fn fetch_navigate(&self, page: &dyn PageHandle, job: &Job) -> Result<Value> {
+        check_url(&job.url)?;
+        page.navigate(&job.url).await?;
+
+        if let Some(selector) = &job.wait_for {
+            let escaped = selector.replace('\\', "\\\\").replace('"', "\\\"");
+            let wait_script = format!(
+                r#"(async () => {{
+                    const sel = "{escaped}";
+                    const isXpath = sel.startsWith("//") || sel.startsWith("(//");
+                    const start = Date.now();
+                    while (Date.now() - start < 10000) {{
+                        const el = isXpath
+                            ? document.evaluate(sel, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
+                            : document.querySelector(sel);
+                        if (el) return true;
+                        await new Promise(r => setTimeout(r, 50));
+                    }}
+                    throw new Error("fetcher: timed out waiting for selector: " + sel);
+                }})()"#
+            );
+            page.evaluate(&wait_script).await?;
+        }
+
+        if let Some(wait_ms) = job.wait_ms {
+            let delay_script = format!(r#"(new Promise(r => setTimeout(r, {wait_ms})))"#);
+            page.evaluate(&delay_script).await?;
+        }
+
+        if job.scroll_y == Some(true) {
+            let scroll_script = r#"(async () => {
+                window.scrollTo(0, document.body.scrollHeight);
+                await new Promise(r => setTimeout(r, 200));
+            })()"#;
+            let _ = page.evaluate(scroll_script).await;
+        }
+
+        let html_val = page.evaluate("document.documentElement.outerHTML").await?;
+        let html_str = html_val.as_str().unwrap_or_default();
+
+        let max = job.max_bytes.map_or(self.config.max_body_bytes, |m| {
+            m.min(self.config.max_body_bytes)
+        });
+        let truncated = html_str.len() > max;
+        let text = if truncated {
+            &html_str[..max]
+        } else {
+            html_str
+        };
+
+        let mut out = serde_json::Map::new();
+        out.insert("url".to_owned(), json!(job.url));
+        out.insert("status".to_owned(), json!(200));
+        out.insert("mime".to_owned(), json!("text/html"));
+        out.insert("text".to_owned(), json!(text));
+        out.insert("truncated".to_owned(), json!(truncated));
+
+        if job.screenshot == Some(true)
+            && let Ok(shot) = page
+                .send("Page.captureScreenshot", json!({ "format": "png" }))
+                .await
+            && let Some(data) = shot.get("data").and_then(Value::as_str)
+        {
+            out.insert("screenshot".to_owned(), json!(data));
+        }
+
+        Ok(Value::Object(out))
     }
 }
 
@@ -239,14 +314,14 @@ impl Task for Fetcher {
             if index > 0 && !input.delay().is_zero() {
                 cx.clock.sleep(input.delay()).await;
             }
+            let job = input.to_job(url);
             let fetched = async {
                 let site = origin(url)?;
-                if input.warm_up && here.as_deref() != Some(site.as_str()) {
+                if !job.is_navigate() && input.warm_up && here.as_deref() != Some(site.as_str()) {
                     page.navigate(&format!("{site}/")).await?;
                     here = Some(site);
                 }
-                self.fetch(&*page, &Job::parse(&json!({ "url": url }))?)
-                    .await
+                self.fetch(&*page, &job).await
             }
             .await;
             let line = match fetched {

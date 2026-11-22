@@ -7,6 +7,15 @@ version; it stays 0.1.x until the next release.
 
 ### Added
 
+- `seleniumbase-rs-plugin-block-resources`: upgraded resource blocking to support declarative CDP
+  `ResourceKind` interception (`Image`, `Media`, `Font`, `Stylesheet`, `Script`) via `Plugin::network`,
+  ensuring dynamic query and CDN image URLs (e.g. `/_next/image?url=...`, avatar endpoints) are blocked
+  directly at the protocol level, in addition to URL wildcard patterns.
+- `seleniumbase-rs-plugin-fetcher`: added full browser navigation and DOM rendering mode (`mode: "navigate"`)
+  supporting `wait_for` selector synchronization, explicit `wait_ms` delays, `scroll_y` auto-scrolling,
+  and base64 `screenshot` capture alongside in-page JavaScript `fetch`.
+- `seleniumbase-rs-plugin-extractor`: added dynamic SPA synchronization with `wait_for` selector polling,
+  `wait_ms` delays, `scroll_y` infinite-scroll expansion, and clean readability-to-`markdown` export.
 - `seleniumbase-rs-plugin`: two methods of `BrowserHandle`, both with a default
   body so no host or plugin has to change: `clock() -> Option<Clock>` (`None`),
   a clock for sleeping and time limits inside a hook such as `on_browser`, which

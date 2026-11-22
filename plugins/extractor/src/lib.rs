@@ -299,6 +299,36 @@ impl Extractor {
         if let Some(url) = &request.url {
             page.navigate(url).await?;
         }
+        if let Some(selector) = &request.wait_for {
+            let escaped = selector.replace('\\', "\\\\").replace('"', "\\\"");
+            let wait_script = format!(
+                r#"(async () => {{
+                    const sel = "{escaped}";
+                    const isXpath = sel.startsWith("//") || sel.startsWith("(//");
+                    const start = Date.now();
+                    while (Date.now() - start < 10000) {{
+                        const el = isXpath
+                            ? document.evaluate(sel, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
+                            : document.querySelector(sel);
+                        if (el) return true;
+                        await new Promise(r => setTimeout(r, 50));
+                    }}
+                    throw new Error("extractor: timed out waiting for selector: " + sel);
+                }})()"#
+            );
+            page.evaluate(&wait_script).await?;
+        }
+        if let Some(wait_ms) = request.wait_ms {
+            let delay_script = format!(r#"(new Promise(r => setTimeout(r, {wait_ms})))"#);
+            page.evaluate(&delay_script).await?;
+        }
+        if request.scroll_y {
+            let scroll_script = r#"(async () => {
+                window.scrollTo(0, document.body.scrollHeight);
+                await new Promise(r => setTimeout(r, 200));
+            })()"#;
+            let _ = page.evaluate(scroll_script).await;
+        }
         let mut notes = Vec::new();
         let schema = match plan {
             Plan::Given(schema) => Some(schema),
@@ -333,6 +363,47 @@ impl Extractor {
         for key in ["text", "links", "tables", "meta"] {
             if let Some(value) = reply.page.get(key) {
                 out.insert(key.to_owned(), value.clone());
+            }
+        }
+        if request.markdown {
+            let md_script = r#"(() => {
+                const article = document.querySelector("article, main, [role='main']") || document.body;
+                const clone = article.cloneNode(true);
+                for (const el of clone.querySelectorAll("script, style, noscript, nav, header, footer, iframe, svg, [aria-hidden='true']")) {
+                    el.remove();
+                }
+                function nodeToMd(node) {
+                    if (node.nodeType === 3) return node.textContent.replace(/\s+/g, " ");
+                    if (node.nodeType !== 1) return "";
+                    const tag = node.tagName.toLowerCase();
+                    let inner = Array.from(node.childNodes).map(nodeToMd).join("");
+                    switch (tag) {
+                        case "h1": return "\n# " + inner.trim() + "\n\n";
+                        case "h2": return "\n## " + inner.trim() + "\n\n";
+                        case "h3": return "\n### " + inner.trim() + "\n\n";
+                        case "h4": return "\n#### " + inner.trim() + "\n\n";
+                        case "p": return "\n\n" + inner.trim() + "\n\n";
+                        case "strong": case "b": return "**" + inner.trim() + "**";
+                        case "em": case "i": return "*" + inner.trim() + "*";
+                        case "a": {
+                            const href = node.getAttribute("href");
+                            return href ? "[" + inner.trim() + "](" + href + ")" : inner;
+                        }
+                        case "ul": return "\n" + inner + "\n";
+                        case "ol": return "\n" + inner + "\n";
+                        case "li": return "- " + inner.trim() + "\n";
+                        case "code": return "`" + inner.trim() + "`";
+                        case "pre": return "\n```\n" + node.textContent.trim() + "\n```\n";
+                        case "blockquote": return "\n> " + inner.trim() + "\n\n";
+                        default: return inner;
+                    }
+                }
+                return nodeToMd(clone).replace(/\n{3,}/g, "\n\n").trim();
+            })()"#;
+            if let Ok(md_val) = page.evaluate(md_script).await
+                && let Some(md_text) = md_val.as_str()
+            {
+                out.insert("markdown".to_owned(), json!(md_text));
             }
         }
         if let Some(schema) = &schema {
