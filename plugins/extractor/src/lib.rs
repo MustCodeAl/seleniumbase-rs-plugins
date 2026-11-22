@@ -409,6 +409,13 @@ impl Extractor {
         if let Some(schema) = &schema {
             out.insert("schema".into(), json!(schema));
         }
+        if let Some(fields) = &request.fields {
+            for record in &mut extraction.records {
+                if let Value::Object(map) = record {
+                    map.retain(|k, _| fields.contains(k));
+                }
+            }
+        }
         out.insert("records".into(), Value::Array(extraction.records));
         out.insert("problems".into(), json!(extraction.problems));
         if extraction.more_problems > 0 {

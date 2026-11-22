@@ -45,6 +45,16 @@ pub(crate) struct TaskInput {
     pub(crate) start: Vec<String>,
     /// Whether to go on from the state file, when there is one that fits.
     pub(crate) resume: bool,
+    /// Selector to wait for on each page before reading.
+    pub(crate) wait_for: Option<String>,
+    /// Delay in ms after navigation before reading.
+    pub(crate) wait_ms: Option<u64>,
+    /// Pixels to scroll down to trigger lazy loading.
+    pub(crate) scroll_y: Option<i64>,
+    /// Field extraction map `{ "field_name": "css_selector" }`.
+    pub(crate) extract: Option<std::collections::HashMap<String, String>>,
+    /// Whether to convert main content to Markdown.
+    pub(crate) markdown: Option<bool>,
 }
 
 impl Default for TaskInput {
@@ -52,6 +62,11 @@ impl Default for TaskInput {
         Self {
             start: Vec::new(),
             resume: true,
+            wait_for: None,
+            wait_ms: None,
+            scroll_y: None,
+            extract: None,
+            markdown: None,
         }
     }
 }
@@ -90,6 +105,7 @@ pub(crate) struct Crawl {
     broken: Vec<Broken>,
     pages: usize,
     truncated: bool,
+    records: Vec<Value>,
 }
 
 impl Crawl {
@@ -233,6 +249,7 @@ impl Crawl {
             robots_blocked: self.blocked.len(),
             truncated: self.truncated,
             no_console_errors: config.expect.no_console_errors,
+            records: self.records.clone(),
         }
     }
 }
@@ -244,6 +261,8 @@ struct Landed {
     status: Option<u16>,
     links: Vec<String>,
     nofollow: bool,
+    extracted: Option<Value>,
+    markdown: Option<String>,
 }
 
 /// How one visit went.
@@ -283,17 +302,32 @@ fn read_landed(reply: &Value) -> Option<Landed> {
                 .collect()
         })
         .unwrap_or_default();
+    let extracted = object.get("extracted").cloned();
+    let markdown = object
+        .get("markdown")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     Some(Landed {
         url,
         title,
         status,
         links,
         nofollow: object.get("nofollow").and_then(Value::as_bool) == Some(true),
+        extracted,
+        markdown,
     })
 }
 
 fn shown(value: &Value) -> String {
     value.to_string().chars().take(200).collect()
+}
+
+struct VisitOptions<'a> {
+    wait_for: Option<&'a str>,
+    wait_ms: Option<u64>,
+    scroll_y: Option<i64>,
+    extract: Option<&'a std::collections::HashMap<String, String>>,
+    markdown: bool,
 }
 
 impl Crawler {
@@ -365,7 +399,9 @@ impl Crawler {
 
         let browser = cx.plugins.guarded_browser(NAME, cx.browser)?;
         let page = browser.new_page(None).await?;
-        let walked = self.walk(&*page, cx, &matcher, &mut crawl, &hash).await;
+        let walked = self
+            .walk(&*page, cx, &matcher, &mut crawl, &hash, &input)
+            .await;
         // The tab is ours: close it whatever happened.
         let _ = page.close().await;
         let saved = self.save(&crawl, &hash);
@@ -413,6 +449,7 @@ impl Crawler {
         matcher: &Matcher,
         crawl: &mut Crawl,
         hash: &str,
+        input: &TaskInput,
     ) -> Result<()> {
         let config = &self.config;
         let base_delay = Duration::from_millis(config.delay_ms);
@@ -420,6 +457,17 @@ impl Crawler {
             std::collections::HashMap::new();
         let mut navigations = 0_usize;
         let mut unsaved = 0_usize;
+        let visit_opts = VisitOptions {
+            wait_for: input
+                .wait_for
+                .as_deref()
+                .or(self.config.wait_for.as_deref()),
+            wait_ms: input.wait_ms.or(self.config.wait_ms),
+            scroll_y: input.scroll_y.or(self.config.scroll_y),
+            extract: input.extract.as_ref().or(self.config.extract.as_ref()),
+            markdown: input.markdown.unwrap_or(self.config.markdown),
+        };
+
         while let Some(item) = crawl.frontier.pop_front() {
             if crawl.landed.contains(&item.url) {
                 continue;
@@ -462,7 +510,7 @@ impl Crawler {
             crawl.pages += 1;
             crawl.visited.push(item.url.clone());
             self.set_current(Some(&item.url));
-            let line = match self.visit(page, &item).await? {
+            let line = match self.visit(page, &item, &visit_opts).await? {
                 Visit::Failed { error, broken } => {
                     if broken {
                         crawl.broken.push(Broken {
@@ -495,7 +543,12 @@ impl Crawler {
     }
 
     /// Opens `item` and reads the page. Only a missing capability is an `Err`.
-    async fn visit(&self, page: &dyn PageHandle, item: &Item) -> Result<Visit> {
+    async fn visit(
+        &self,
+        page: &dyn PageHandle,
+        item: &Item,
+        options: &VisitOptions<'_>,
+    ) -> Result<Visit> {
         match page.navigate(&item.url).await {
             Ok(()) => {}
             Err(error @ PluginError::Capability { .. }) => return Err(error),
@@ -513,10 +566,42 @@ impl Crawler {
                 });
             }
         }
-        let script = format!(
-            "({PAGE_JS})({})",
-            json!({ "max_links": self.config.max_links })
-        );
+
+        if let Some(sel) = options.wait_for {
+            let escaped = sel.replace('\\', "\\\\").replace('"', "\\\"");
+            let wait_script = format!(
+                r#"(async () => {{
+                    const isXpath = "{escaped}".startsWith("//") || "{escaped}".startsWith("(//");
+                    const start = Date.now();
+                    while (Date.now() - start < 10000) {{
+                        const el = isXpath
+                            ? document.evaluate("{escaped}", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
+                            : document.querySelector("{escaped}");
+                        if (el) return true;
+                        await new Promise(r => setTimeout(r, 50));
+                    }}
+                    return false;
+                }})()"#
+            );
+            let _ = page.evaluate(&wait_script).await;
+        }
+
+        if let Some(scroll_px) = options.scroll_y {
+            let scroll_script = format!("window.scrollBy(0, {scroll_px})");
+            let _ = page.evaluate(&scroll_script).await;
+        }
+
+        if let Some(delay) = options.wait_ms {
+            let delay_script = format!(r#"(new Promise(r => setTimeout(r, {delay})))"#);
+            let _ = page.evaluate(&delay_script).await;
+        }
+
+        let req = json!({
+            "max_links": self.config.max_links,
+            "extract": options.extract,
+            "markdown": options.markdown,
+        });
+        let script = format!("({PAGE_JS})({req})");
         let reply = match page.evaluate(&script).await {
             Ok(reply) => reply,
             Err(error @ PluginError::Capability { .. }) => return Err(error),
@@ -577,6 +662,17 @@ impl Crawler {
         line["queued"] = json!(queued);
         if final_url != item.url {
             line["final_url"] = json!(final_url);
+        }
+        if let Some(extracted) = &landed.extracted {
+            line["extracted"] = extracted.clone();
+            crawl.records.push(json!({
+                "url": item.url,
+                "depth": item.depth,
+                "extracted": extracted,
+            }));
+        }
+        if let Some(md) = &landed.markdown {
+            line["markdown"] = json!(md);
         }
         if let Some(status) = status
             && status > self.config.expect.max_status

@@ -56,6 +56,8 @@ pub struct Report {
     pub truncated: bool,
     /// Whether console errors fail the report (`expect.no_console_errors`).
     pub no_console_errors: bool,
+    /// Extracted records from visited pages, if extraction was requested.
+    pub records: Vec<Value>,
 }
 
 impl Report {
@@ -134,7 +136,7 @@ impl Report {
     /// lists in full, `passed` and `summary`.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        json!({
+        let mut rep = json!({
             "pages": self.pages,
             "edges": self.edges.len(),
             "broken": self.broken,
@@ -145,7 +147,12 @@ impl Report {
             "truncated": self.truncated,
             "passed": self.passed(),
             "summary": self.summary(),
-        })
+        });
+        if !self.records.is_empty() {
+            rep["records"] = json!(self.records);
+            rep["total_records"] = json!(self.records.len());
+        }
+        rep
     }
 }
 

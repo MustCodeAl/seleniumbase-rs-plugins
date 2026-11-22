@@ -115,14 +115,22 @@ impl PageHandle for Site {
                 ..SitePage::default()
             });
             let url = page.landing.clone().unwrap_or(current);
-            return Ok(json!({
+            let mut out = json!({
                 "url": url,
                 "title": page.title,
                 "status": page.status,
                 "links": page.links,
                 "truncated": false,
                 "nofollow": page.nofollow,
-            }));
+            });
+            if expression.contains("\"extract\":{") || expression.contains("\"extract\": {") {
+                out["extracted"] = json!({ "title": page.title });
+            }
+            if expression.contains("\"markdown\":true") || expression.contains("\"markdown\": true")
+            {
+                out["markdown"] = json!(format!("# {}", page.title));
+            }
+            return Ok(out);
         }
         if expression.contains("innerText") {
             let (status, text) = state
@@ -1427,4 +1435,35 @@ fn finish_helper_runs_a_paused_crawl_to_the_end() {
     let cx = h.cx(&input);
     let summary = finish(h.set.task("crawler").unwrap().run(&cx), &h.timer).unwrap();
     assert_eq!(summary["pages"], 4);
+}
+
+#[test]
+fn a_crawl_can_extract_structured_fields_and_markdown_per_page() {
+    let site = Site::default()
+        .page(
+            "https://a.test/",
+            200,
+            "Shop Front",
+            &["https://a.test/item-1"],
+        )
+        .page("https://a.test/item-1", 200, "Item One", &[]);
+    let h = Harness::new(
+        config(
+            &["https://a.test/"],
+            json!({
+                "extract": { "title": "h1" },
+                "markdown": true,
+            }),
+        ),
+        site,
+    );
+    let summary = h.go(&json!({})).unwrap();
+    assert_eq!(summary["pages"], 2);
+    assert_eq!(summary["total_records"], 2);
+    let records = summary["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["extracted"]["title"], "Shop Front");
+    assert_eq!(records[1]["extracted"]["title"], "Item One");
+    assert_eq!(records[0]["url"], "https://a.test/");
+    assert_eq!(records[1]["url"], "https://a.test/item-1");
 }

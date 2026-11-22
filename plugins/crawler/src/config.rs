@@ -129,6 +129,16 @@ pub struct CrawlerConfig {
     pub state_file: Option<PathBuf>,
     /// What the crawl must find.
     pub expect: Expect,
+    /// Optional CSS selector to wait for on each crawled page before reading links and content.
+    pub wait_for: Option<String>,
+    /// Optional delay in milliseconds to wait after navigation before reading links and content.
+    pub wait_ms: Option<u64>,
+    /// Optional scroll distance in pixels to trigger lazy loading.
+    pub scroll_y: Option<i64>,
+    /// Optional CSS selector map `{ "field_name": "css_selector" }` to extract structured fields per page.
+    pub extract: Option<std::collections::HashMap<String, String>>,
+    /// Whether to extract main content as structured Markdown.
+    pub markdown: bool,
 }
 
 impl Default for CrawlerConfig {
@@ -145,6 +155,11 @@ impl Default for CrawlerConfig {
             max_links: 1000,
             state_file: None,
             expect: Expect::default(),
+            wait_for: None,
+            wait_ms: None,
+            scroll_y: None,
+            extract: None,
+            markdown: false,
         }
     }
 }

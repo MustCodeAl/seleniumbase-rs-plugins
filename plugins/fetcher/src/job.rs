@@ -43,6 +43,15 @@ pub struct Job {
     /// Full JS execution / HTML rendering (default true in navigate mode).
     #[serde(default)]
     pub js_render: Option<bool>,
+    /// Sequence of browser action steps to execute before capturing (`click`, `fill`, `wait_for`, `scroll_y`, `wait`).
+    #[serde(default)]
+    pub actions: Option<Vec<Value>>,
+    /// Extraction schema: map of `{ "field_name": "css_selector" }`.
+    #[serde(default)]
+    pub extract: Option<std::collections::HashMap<String, String>>,
+    /// Whether to convert rendered main content into clean Markdown.
+    #[serde(default)]
+    pub markdown: Option<bool>,
 }
 
 impl Job {
@@ -59,6 +68,9 @@ impl Job {
             || self.wait_for.is_some()
             || self.scroll_y == Some(true)
             || self.screenshot == Some(true)
+            || self.actions.is_some()
+            || self.extract.is_some()
+            || self.markdown == Some(true)
     }
 
     /// The expression that fetches the URL. Both values travel as a JSON
@@ -82,7 +94,16 @@ pub(crate) fn read_reply(reply: &Value) -> Result<Value> {
             PluginError::other(format!("fetcher: unexpected reply from the page: {reply}"))
         })?;
     let mut out = serde_json::Map::new();
-    for key in ["url", "status", "mime", "text", "truncated", "screenshot"] {
+    for key in [
+        "url",
+        "status",
+        "mime",
+        "text",
+        "truncated",
+        "screenshot",
+        "extracted",
+        "markdown",
+    ] {
         if let Some(val) = object.get(key) {
             out.insert(key.to_owned(), val.clone());
         }
@@ -106,6 +127,9 @@ pub(crate) struct TaskInput {
     pub(crate) wait_ms: Option<u64>,
     pub(crate) scroll_y: Option<bool>,
     pub(crate) screenshot: Option<bool>,
+    pub(crate) actions: Option<Vec<Value>>,
+    pub(crate) extract: Option<std::collections::HashMap<String, String>>,
+    pub(crate) markdown: Option<bool>,
 }
 
 impl Default for TaskInput {
@@ -119,6 +143,9 @@ impl Default for TaskInput {
             wait_ms: None,
             scroll_y: None,
             screenshot: None,
+            actions: None,
+            extract: None,
+            markdown: None,
         }
     }
 }
@@ -160,6 +187,9 @@ impl TaskInput {
             scroll_y: self.scroll_y,
             screenshot: self.screenshot,
             js_render: None,
+            actions: self.actions.clone(),
+            extract: self.extract.clone(),
+            markdown: self.markdown,
         }
     }
 }

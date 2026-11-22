@@ -204,6 +204,59 @@ impl Fetcher {
             page.evaluate(&delay_script).await?;
         }
 
+        if let Some(actions) = &job.actions {
+            for action in actions {
+                if let Some(click_sel) = action.get("click").and_then(Value::as_str) {
+                    let escaped = click_sel.replace('\\', "\\\\").replace('"', "\\\"");
+                    let click_js = format!(
+                        r#"(async () => {{
+                            const el = document.querySelector("{escaped}");
+                            if (!el) throw new Error("fetcher: element not found to click: {escaped}");
+                            el.click();
+                        }})()"#
+                    );
+                    page.evaluate(&click_js).await?;
+                } else if let Some(fill) = action.get("fill") {
+                    if let (Some(sel), Some(val)) = (
+                        fill.get("selector").and_then(Value::as_str),
+                        fill.get("value").and_then(Value::as_str),
+                    ) {
+                        let escaped_sel = sel.replace('\\', "\\\\").replace('"', "\\\"");
+                        let escaped_val = val.replace('\\', "\\\\").replace('"', "\\\"");
+                        let fill_js = format!(
+                            r#"(async () => {{
+                                const el = document.querySelector("{escaped_sel}");
+                                if (!el) throw new Error("fetcher: element not found to fill: {escaped_sel}");
+                                el.value = "{escaped_val}";
+                                el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                                el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                            }})()"#
+                        );
+                        page.evaluate(&fill_js).await?;
+                    }
+                } else if let Some(wait_sel) = action.get("wait_for").and_then(Value::as_str) {
+                    let escaped = wait_sel.replace('\\', "\\\\").replace('"', "\\\"");
+                    let wait_js = format!(
+                        r#"(async () => {{
+                            const start = Date.now();
+                            while (Date.now() - start < 10000) {{
+                                if (document.querySelector("{escaped}")) return true;
+                                await new Promise(r => setTimeout(r, 50));
+                            }}
+                            throw new Error("fetcher: timed out waiting for selector: {escaped}");
+                        }})()"#
+                    );
+                    page.evaluate(&wait_js).await?;
+                } else if let Some(scroll_px) = action.get("scroll_y").and_then(Value::as_i64) {
+                    let scroll_js = format!("window.scrollBy(0, {scroll_px})");
+                    let _ = page.evaluate(&scroll_js).await;
+                } else if let Some(wait_ms) = action.get("wait").and_then(Value::as_u64) {
+                    let delay_js = format!(r#"(new Promise(r => setTimeout(r, {wait_ms})))"#);
+                    let _ = page.evaluate(&delay_js).await;
+                }
+            }
+        }
+
         if job.scroll_y == Some(true) {
             let scroll_script = r#"(async () => {
                 window.scrollTo(0, document.body.scrollHeight);
@@ -231,6 +284,63 @@ impl Fetcher {
         out.insert("mime".to_owned(), json!("text/html"));
         out.insert("text".to_owned(), json!(text));
         out.insert("truncated".to_owned(), json!(truncated));
+
+        if let Some(extract_map) = &job.extract {
+            let req_json = serde_json::to_string(extract_map).unwrap_or_else(|_| "{}".to_owned());
+            let extract_script = format!(
+                r#"((selectors) => {{
+                    const res = {{}};
+                    for (const [key, sel] of Object.entries(selectors)) {{
+                        try {{
+                            const el = document.querySelector(sel);
+                            res[key] = el ? (el.innerText || el.textContent || "").trim() : null;
+                        }} catch (_) {{
+                            res[key] = null;
+                        }}
+                    }}
+                    return res;
+                }})({req_json})"#
+            );
+            if let Ok(extracted) = page.evaluate(&extract_script).await {
+                out.insert("extracted".to_owned(), extracted);
+            }
+        }
+
+        if job.markdown == Some(true) {
+            let md_script = r#"(async () => {
+                const container = document.querySelector("article, main, #content, [role='main']") || document.body;
+                const clone = container.cloneNode(true);
+                const drop = clone.querySelectorAll("script, style, noscript, nav, footer, header, aside, [aria-hidden='true']");
+                drop.forEach(n => n.remove());
+                function nodeToMd(node) {
+                    if (!node) return "";
+                    if (node.nodeType === 3) return node.textContent.replace(/\s+/g, " ");
+                    if (node.nodeType !== 1) return "";
+                    const tag = node.tagName.toLowerCase();
+                    let kids = "";
+                    for (const c of node.childNodes) kids += nodeToMd(c);
+                    kids = kids.trim();
+                    if (!kids) return "";
+                    if (tag === "h1") return "\n# " + kids + "\n";
+                    if (tag === "h2") return "\n## " + kids + "\n";
+                    if (tag === "h3") return "\n### " + kids + "\n";
+                    if (tag === "h4" || tag === "h5" || tag === "h6") return "\n#### " + kids + "\n";
+                    if (tag === "p") return "\n\n" + kids + "\n\n";
+                    if (tag === "li") return "\n- " + kids;
+                    if (tag === "blockquote") return "\n> " + kids + "\n";
+                    if (tag === "code") return "`" + kids + "`";
+                    if (tag === "pre") return "\n```\n" + kids + "\n```\n";
+                    if (tag === "a" && node.href) return "[" + kids + "](" + node.href + ")";
+                    if (tag === "strong" || tag === "b") return "**" + kids + "**";
+                    if (tag === "em" || tag === "i") return "*" + kids + "*";
+                    return kids;
+                }
+                return nodeToMd(clone).replace(/\n{3,}/g, "\n\n").trim();
+            })()"#;
+            if let Ok(md) = page.evaluate(md_script).await {
+                out.insert("markdown".to_owned(), md);
+            }
+        }
 
         if job.screenshot == Some(true)
             && let Ok(shot) = page

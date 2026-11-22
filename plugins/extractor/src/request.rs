@@ -73,6 +73,10 @@ pub struct Request {
     pub scroll_y: bool,
     /// Also return the main content of the page as clean Markdown.
     pub markdown: bool,
+    /// Filter returned records to only these field names.
+    pub fields: Option<Vec<String>>,
+    /// Automatic structure discovery without selectors (alias for discover).
+    pub auto: Option<bool>,
 }
 
 /// What to do about the records of a page.
@@ -102,7 +106,8 @@ impl Request {
             return Err(bad("`item` needs a `select` map"));
         }
         let wants_page = self.text || self.links || self.tables || self.meta || self.markdown;
-        Ok(match self.discover {
+        let discover = self.auto.or(self.discover);
+        Ok(match discover {
             Some(true) => Plan::Discover(self.source),
             Some(false) => Plan::Nothing,
             None if wants_page => Plan::Nothing,
