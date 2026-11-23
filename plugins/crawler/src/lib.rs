@@ -101,6 +101,7 @@ mod robots;
 mod scope;
 mod state;
 mod url;
+pub mod sitemap;
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -120,6 +121,7 @@ pub use config::{
 };
 pub use crawl::{MAX_EDGES, MAX_QUEUE};
 pub use report::{Broken, JsError, MAX_JS_ERRORS, Report};
+pub use sitemap::parse_sitemap_urls;
 
 use scope::Matcher;
 use url::normalise;
