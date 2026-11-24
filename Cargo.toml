@@ -16,6 +16,7 @@ members = [
     "plugins/tor",
     "plugins/wasm",
     "plugins/antibot-detector",
+    "plugins/langchain",
 ]
 exclude = ["template"]
 
@@ -27,6 +28,7 @@ license = "MIT"
 repository = "https://github.com/MustCodeAl/seleniumbase-rs-plugins"
 
 [workspace.dependencies]
+seleniumbase-rs = { path = "../seleniumbase-rs", default-features = false }
 seleniumbase-rs-plugin = { path = "crates/seleniumbase-rs-plugin" }
 seleniumbase-rs-plugin-testing = { path = "crates/seleniumbase-rs-plugin-testing" }
 seleniumbase-rs-plugin-batcher = { path = "plugins/batcher", version = "0.1" }

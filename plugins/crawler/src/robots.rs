@@ -1,8 +1,12 @@
 //! robots.txt, read the way RFC 9309 asks: the group for our name, else the
 //! group for `*`; of the rules that match, the longest wins and `Allow` wins a
 //! tie; `*` and a trailing `$` work in a rule.
+//!
+//! Powered by core [`RobotsPolicy`](seleniumbase_rs::crawler::RobotsPolicy).
 
 use std::time::Duration;
+
+use seleniumbase_rs::crawler::RobotsPolicy;
 
 /// The product token the crawler answers to in a `User-agent` line, besides `*`.
 pub(crate) const AGENT: &str = "sbrs";
@@ -10,28 +14,13 @@ pub(crate) const AGENT: &str = "sbrs";
 /// The longest `Crawl-delay` honoured.
 const MAX_CRAWL_DELAY: Duration = Duration::from_secs(60);
 
-/// Most rules read from one file; the rest are ignored.
-const MAX_RULES: usize = 10_000;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Rule {
-    allow: bool,
-    pattern: String,
-}
-
 /// The rules that apply to the crawler on one site.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Robots {
-    rules: Vec<Rule>,
-    delay: Option<f64>,
+    policy: Option<RobotsPolicy<'static>>,
+    agent: String,
+    delay: Option<Duration>,
     disallow_all: bool,
-}
-
-#[derive(Default)]
-struct Group {
-    agents: Vec<String>,
-    rules: Vec<Rule>,
-    delay: Option<f64>,
 }
 
 impl Robots {
@@ -51,61 +40,12 @@ impl Robots {
 
     /// Reads the file `text` for the crawler named `agent`.
     pub(crate) fn parse(text: &str, agent: &str) -> Self {
-        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-        let mut groups: Vec<Group> = Vec::new();
-        let mut collecting = false;
-        for raw in text.lines() {
-            let line = raw.split('#').next().unwrap_or_default().trim();
-            let Some((key, value)) = line.split_once(':') else {
-                continue;
-            };
-            let (key, value) = (key.trim().to_ascii_lowercase(), value.trim());
-            match key.as_str() {
-                "user-agent" => {
-                    if !collecting || groups.is_empty() {
-                        groups.push(Group::default());
-                    }
-                    collecting = true;
-                    if let Some(group) = groups.last_mut() {
-                        group.agents.push(value.to_ascii_lowercase());
-                    }
-                }
-                "allow" | "disallow" | "crawl-delay" => {
-                    collecting = false;
-                    let Some(group) = groups.last_mut() else {
-                        continue;
-                    };
-                    if key == "crawl-delay" {
-                        if let Ok(seconds) = value.parse::<f64>()
-                            && seconds.is_finite()
-                            && seconds > 0.0
-                        {
-                            group.delay = Some(seconds);
-                        }
-                    } else if !value.is_empty() && group.rules.len() < MAX_RULES {
-                        group.rules.push(Rule {
-                            allow: key == "allow",
-                            pattern: value.to_owned(),
-                        });
-                    }
-                }
-                _ => collecting = false,
-            }
-        }
-        let agent = agent.to_ascii_lowercase();
-        let mut chosen: Vec<&Group> = groups
-            .iter()
-            .filter(|g| g.agents.contains(&agent))
-            .collect();
-        if chosen.is_empty() {
-            chosen = groups
-                .iter()
-                .filter(|g| g.agents.iter().any(|a| a == "*"))
-                .collect();
-        }
+        let policy = RobotsPolicy::parse(text).into_owned();
+        let delay = policy.crawl_delay(agent).map(|d| d.min(MAX_CRAWL_DELAY));
         Self {
-            rules: chosen.iter().flat_map(|g| g.rules.clone()).collect(),
-            delay: chosen.iter().filter_map(|g| g.delay).reduce(f64::max),
+            policy: Some(policy),
+            agent: agent.to_owned(),
+            delay,
             disallow_all: false,
         }
     }
@@ -118,53 +58,15 @@ impl Robots {
         if target == "/robots.txt" {
             return true;
         }
-        let mut best: Option<(usize, bool)> = None;
-        for rule in &self.rules {
-            if rule_matches(&rule.pattern, target) {
-                let length = rule.pattern.len();
-                best = match best {
-                    Some((len, allow)) if len > length || (len == length && allow) => best,
-                    _ => Some((length, rule.allow)),
-                };
-            }
-        }
-        best.is_none_or(|(_, allow)| allow)
+        let Some(policy) = &self.policy else {
+            return true;
+        };
+        policy.is_allowed(&self.agent, target)
     }
 
     /// The `Crawl-delay` of the group, at most a minute.
     pub(crate) fn crawl_delay(&self) -> Option<Duration> {
         self.delay
-            .map(|seconds| Duration::from_secs_f64(seconds).min(MAX_CRAWL_DELAY))
-    }
-}
-
-/// Whether `pattern` (with `*` and a trailing `$`) matches the start of
-/// `path`, or all of it when anchored by `$`.
-fn rule_matches(pattern: &str, path: &str) -> bool {
-    let (pattern, anchored) = match pattern.strip_suffix('$') {
-        Some(rest) => (rest, true),
-        None => (pattern, false),
-    };
-    let parts: Vec<&str> = pattern.split('*').collect();
-    let count = parts.len();
-    if !path.starts_with(parts[0]) {
-        return false;
-    }
-    let mut position = parts[0].len();
-    if count == 1 {
-        return !anchored || path.len() == position;
-    }
-    for part in &parts[1..count - 1] {
-        match path.get(position..).and_then(|rest| rest.find(part)) {
-            Some(at) => position += at + part.len(),
-            None => return false,
-        }
-    }
-    let tail = parts[count - 1];
-    if anchored {
-        path.len() >= position + tail.len() && path.ends_with(tail)
-    } else {
-        path.get(position..).is_some_and(|rest| rest.contains(tail))
     }
 }
 

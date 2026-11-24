@@ -121,6 +121,8 @@ pub use config::{
 };
 pub use crawl::{MAX_EDGES, MAX_QUEUE};
 pub use report::{Broken, JsError, MAX_JS_ERRORS, Report};
+pub use seleniumbase_rs::crawler::RobotsPolicy;
+pub use seleniumbase_rs::crawler::spider::{extract_links_from_html, normalize_url};
 pub use sitemap::parse_sitemap_urls;
 
 use scope::Matcher;
