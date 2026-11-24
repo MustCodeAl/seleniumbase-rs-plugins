@@ -1,0 +1,24 @@
+[package]
+name = "antibot-detector"
+description = "Antibot and security challenge detector for seleniumbase-rs matching Scrapfly Antibot-Detector (Cloudflare, DataDome, Akamai, Kasada, PerimeterX, Imperva, AWS WAF, FingerprintJS)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "antibot", "scraping", "detector"]
+
+[dependencies]
+seleniumbase-rs-plugin = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[features]
+default = ["plugin"]
+plugin = ["dep:seleniumbase-rs-plugin", "dep:async-trait"]
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
+tokio.workspace = true

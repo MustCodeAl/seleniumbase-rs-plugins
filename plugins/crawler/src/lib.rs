@@ -99,9 +99,9 @@ mod crawl;
 mod report;
 mod robots;
 mod scope;
+pub mod sitemap;
 mod state;
 mod url;
-pub mod sitemap;
 
 use std::collections::HashMap;
 use std::fmt::Display;

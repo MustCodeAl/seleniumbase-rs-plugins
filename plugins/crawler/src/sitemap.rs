@@ -57,6 +57,9 @@ mod tests {
             </urlset>
         "#;
         let urls = parse_sitemap_urls(sitemap);
-        assert_eq!(urls, vec!["https://shop.com/item/1", "https://shop.com/item/2"]);
+        assert_eq!(
+            urls,
+            vec!["https://shop.com/item/1", "https://shop.com/item/2"]
+        );
     }
 }

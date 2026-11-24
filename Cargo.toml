@@ -15,6 +15,7 @@ members = [
     "plugins/shield",
     "plugins/tor",
     "plugins/wasm",
+    "plugins/antibot-detector",
 ]
 exclude = ["template"]
 
