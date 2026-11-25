@@ -37,7 +37,7 @@ default:
     when: runner_system_failure
 
 variables:
-  RUST_VERSION: "1.99"
+  RUST_VERSION: "1.100"
   # Two build jobs fit the 2 vCPUs and 8 GB of the runner.
   CARGO_BUILD_JOBS: "2"
   CARGO_INCREMENTAL: "0"

@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to the crates in this repository. The crates share one
-version; it stays 0.1.x until the next release.
+version across all published plugins and plugin crates.
 
-## Unreleased
+## [0.9.3] - 2026-11-25
 
 ### Added
 

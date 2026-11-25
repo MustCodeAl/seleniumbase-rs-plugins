@@ -102,6 +102,7 @@ mod scope;
 pub mod sitemap;
 mod state;
 mod url;
+pub mod warc;
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -121,6 +122,7 @@ pub use config::{
 };
 pub use crawl::{MAX_EDGES, MAX_QUEUE};
 pub use report::{Broken, JsError, MAX_JS_ERRORS, Report};
+pub use warc::{WarcRecordType, WarcWriter};
 pub use seleniumbase_rs::crawler::RobotsPolicy;
 pub use seleniumbase_rs::crawler::spider::{extract_links_from_html, normalize_url};
 pub use sitemap::parse_sitemap_urls;
