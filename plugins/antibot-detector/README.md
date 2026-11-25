@@ -1,6 +1,6 @@
 # antibot-detector
 
-An anti-bot, CAPTCHA, and fingerprinting detector for [seleniumbase-rs](https://github.com/MustCodeAl/seleniumbase-rs), matching the capabilities of [Scrapfly's Antibot-Detector](https://github.com/scrapfly/Antibot-Detector).
+A native multi-signal anti-bot, CAPTCHA, and fingerprinting challenge detector for [seleniumbase-rs](https://github.com/MustCodeAl/seleniumbase-rs).
 
 ## Features
 

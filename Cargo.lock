@@ -1966,6 +1966,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs-plugin-behavior-dataset"
+version = "0.1.3"
+dependencies = [
+ "async-trait",
+ "seleniumbase-rs",
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-testing",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "seleniumbase-rs-plugin-block-resources"
 version = "0.1.3"
 dependencies = [
@@ -2052,6 +2066,19 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "seleniumbase-rs",
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-testing",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "seleniumbase-rs-plugin-owasp"
+version = "0.1.3"
+dependencies = [
+ "async-trait",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
  "serde",

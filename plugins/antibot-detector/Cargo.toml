@@ -1,6 +1,6 @@
 [package]
 name = "antibot-detector"
-description = "Antibot and security challenge detector for seleniumbase-rs matching Scrapfly Antibot-Detector (Cloudflare, DataDome, Akamai, Kasada, PerimeterX, Imperva, AWS WAF, FingerprintJS)"
+description = "Multi-signal anti-bot, CAPTCHA, and security challenge detector for seleniumbase-rs (Cloudflare, DataDome, Akamai, Kasada, PerimeterX, Imperva, AWS WAF, FingerprintJS)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

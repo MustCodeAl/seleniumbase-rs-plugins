@@ -1,0 +1,25 @@
+[package]
+name = "seleniumbase-rs-plugin-behavior-dataset"
+description = "Synthetic human-like web behavior generator and batch ML training dataset exporter for seleniumbase-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "behavior", "dataset", "ml"]
+
+[dependencies]
+seleniumbase-rs = { workspace = true }
+seleniumbase-rs-plugin = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[features]
+default = ["plugin"]
+plugin = ["dep:seleniumbase-rs-plugin", "dep:async-trait"]
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }

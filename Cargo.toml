@@ -16,7 +16,9 @@ members = [
     "plugins/tor",
     "plugins/wasm",
     "plugins/antibot-detector",
+    "plugins/behavior-dataset",
     "plugins/langchain",
+    "plugins/owasp",
 ]
 exclude = ["template"]
 

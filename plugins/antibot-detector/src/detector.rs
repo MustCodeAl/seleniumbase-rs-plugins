@@ -5,8 +5,8 @@ use crate::types::{BotProtectionResult, Cookie, DetectionError, Page, Result};
 
 /// An anti-bot and security challenge detector for web pages and browser sessions.
 ///
-/// Models the capabilities of Scrapfly's Antibot-Detector, providing signal analysis
-/// across cookies, HTML DOM elements, scripts, iframes, challenge markers, and headers.
+/// Provides native multi-signal heuristic analysis across cookies, HTML DOM elements,
+/// scripts, iframes, challenge markers, and headers.
 ///
 /// # Examples
 ///

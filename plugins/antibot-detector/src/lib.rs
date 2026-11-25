@@ -1,8 +1,7 @@
 //! Antibot and security challenge detector for [seleniumbase-rs](https://github.com/MustCodeAl/seleniumbase-rs).
 //!
-//! Inspired by and matching the capabilities of Scrapfly's Antibot-Detector, this crate provides
-//! real-time multi-signal analysis to detect anti-bot systems, challenge pages, CAPTCHAs, and browser
-//! fingerprinting libraries.
+//! Provides native multi-signal analysis to detect anti-bot systems, challenge pages,
+//! CAPTCHAs, and browser fingerprinting libraries.
 //!
 //! # Supported Protections
 //!
