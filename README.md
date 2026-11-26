@@ -6,7 +6,7 @@ puppeteer-extra plugins do for Puppeteer. The design is
 [ADR 004](https://github.com/MustCodeAl/seleniumbase-rs/blob/main/docs/adr/004-plugin-framework.md).
 
 > [!NOTE]
-> Plugins run in seleniumbase-rs (v0.9.3+) behind its `plugins` feature: in both
+> Plugins run in seleniumbase-rs (v0.10.0+; plugin host available since v0.9.3) behind its `plugins` feature: in both
 > the pure CDP engine (`sb_cdp`) and the WebDriver engine (`BaseCase`). The
 > [Browser Plugins guide](https://github.com/MustCodeAl/seleniumbase-rs/blob/main/docs/tutorials/plugins.md)
 > shows how to attach a plugin set to a browser.

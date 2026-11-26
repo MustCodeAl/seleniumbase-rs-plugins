@@ -18,12 +18,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allocator-api2"
-version = "0.2.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57b212daf2e827b1ccdd778b7eb48ba433e58cb0e4f27b43cd6b7a608425a014"
-
-[[package]]
 name = "anstream"
 version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1913,50 +1907,8 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs"
-version = "0.9.4"
-source = "git+https://github.com/MustCodeAl/seleniumbase-rs?branch=main#ea1d70a4adb8ef7f349a1228bb01bc2cb1da3e47"
-dependencies = [
- "allocator-api2",
- "anstream",
- "async-trait",
- "base64",
- "bytes",
- "dirs",
- "figment",
- "flate2",
- "futures-util",
- "http",
- "indicatif",
- "jiff",
- "owo-colors",
- "rand",
- "rand_distr",
- "regex",
- "reqwest",
- "ring",
- "rustls",
- "scraper",
- "serde",
- "serde_json",
- "tar",
- "tempfile",
- "thirtyfour",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite",
- "toml",
- "tracing",
- "tracing-log",
- "tracing-subscriber",
- "url",
- "which",
- "zip",
-]
-
-[[package]]
-name = "seleniumbase-rs"
 version = "0.10.0"
-source = "git+https://github.com/MustCodeAl/seleniumbase-rs?branch=feat%2Fv0.10-core-split#502f84a1aba465ca514fc5575cf90fec45de0427"
+source = "git+https://github.com/MustCodeAl/seleniumbase-rs?branch=main#a69b2ff5f5e8d80b50bd63be5a0fbf433668e643"
 dependencies = [
  "anstream",
  "async-trait",
@@ -2022,7 +1974,7 @@ name = "seleniumbase-rs-plugin-behavior-dataset"
 version = "0.10.0"
 dependencies = [
  "async-trait",
- "seleniumbase-rs 0.10.0",
+ "seleniumbase-rs",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
  "serde",
@@ -2135,7 +2087,7 @@ name = "seleniumbase-rs-plugin-langchain"
 version = "0.10.0"
 dependencies = [
  "async-trait",
- "seleniumbase-rs 0.9.4",
+ "seleniumbase-rs",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-extractor",
  "seleniumbase-rs-plugin-testing",
