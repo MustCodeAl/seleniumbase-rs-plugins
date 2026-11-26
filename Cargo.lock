@@ -737,6 +737,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "getopts"
+version = "0.2.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe4fbac503b8d1f88e6676011885f34b7174f46e59956bba534ba83abded4df"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1887,6 +1896,7 @@ checksum = "6844b5f49a5579f12ba4f89d9f7eec6d71889e4aa0bc7181821040ce66f08fff"
 dependencies = [
  "cssparser",
  "ego-tree",
+ "getopts",
  "html5ever",
  "precomputed-hash",
  "selectors",
@@ -2053,7 +2063,6 @@ dependencies = [
 name = "seleniumbase-rs-plugin-crawler"
 version = "0.9.4"
 dependencies = [
- "seleniumbase-rs",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
  "serde",
@@ -2075,10 +2084,12 @@ dependencies = [
 name = "seleniumbase-rs-plugin-extractor"
 version = "0.9.4"
 dependencies = [
+ "scraper",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2115,6 +2126,7 @@ dependencies = [
  "async-trait",
  "seleniumbase-rs",
  "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-extractor",
  "seleniumbase-rs-plugin-testing",
  "serde",
  "serde_json",

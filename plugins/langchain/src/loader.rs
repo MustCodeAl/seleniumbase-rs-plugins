@@ -2,7 +2,9 @@
 
 use crate::document::{Document, DocumentMetadata};
 use crate::error::{LangChainError, Result};
-use seleniumbase_rs::extract::{MarkdownOptions, PageMetadata, html_to_markdown_with};
+use seleniumbase_rs_plugin_extractor::html::{
+    MarkdownOptions, PageMetadata, html_to_markdown_with,
+};
 
 #[cfg(feature = "plugin")]
 use seleniumbase_rs_plugin::PageHandle;
@@ -10,8 +12,8 @@ use seleniumbase_rs_plugin::PageHandle;
 /// A LangChain-compatible document loader that extracts clean Markdown
 /// and rich page metadata from web pages.
 ///
-/// Uses [`seleniumbase_rs::extract::html_to_markdown`] for token-efficient content
-/// conversion and [`seleniumbase_rs::extract::PageMetadata`] for structured head tags.
+/// Uses [`seleniumbase_rs_plugin_extractor::html::html_to_markdown`] for token-efficient content
+/// conversion and [`seleniumbase_rs_plugin_extractor::html::PageMetadata`] for structured head tags.
 ///
 /// # Examples
 ///

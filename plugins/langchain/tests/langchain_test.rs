@@ -1,7 +1,7 @@
 //! Comprehensive unit and integration tests for seleniumbase-rs-plugin-langchain.
 
-use seleniumbase_rs::extract::PageMetadata;
 use seleniumbase_rs_plugin::PluginSet;
+use seleniumbase_rs_plugin_extractor::html::PageMetadata;
 use seleniumbase_rs_plugin_langchain::{
     Document, DocumentMetadata, LangChainPlugin, SeleniumBaseLoader, SeleniumBaseTool, ToolAction,
     ToolInput, ToolOutput,

@@ -2,9 +2,9 @@
 //!
 //! Provides two core components for LLM and agentic workflows:
 //! 1. [`SeleniumBaseLoader`]: Loads web pages into LangChain-compatible [`Document`] structures.
-//!    Extracts token-efficient, clean Markdown via [`seleniumbase_rs::extract::html_to_markdown`]
+//!    Extracts token-efficient, clean Markdown via [`seleniumbase_rs_plugin_extractor::html::html_to_markdown`]
 //!    and structured metadata (`url`, `title`, `description`, `source`) via
-//!    [`seleniumbase_rs::extract::PageMetadata`].
+//!    [`seleniumbase_rs_plugin_extractor::html::PageMetadata`].
 //! 2. [`SeleniumBaseTool`]: Tool-calling interface for LangChain and OpenAI-compatible agents.
 //!    Supports `navigate`, `click`, `type_text`, and `extract_markdown` actions with full JSON Schema.
 //!

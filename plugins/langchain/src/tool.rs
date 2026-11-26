@@ -1,7 +1,7 @@
 //! Tool-calling interface for LangChain agents using seleniumbase-rs.
 
 use crate::error::{LangChainError, Result};
-use seleniumbase_rs::extract::html_to_markdown;
+use seleniumbase_rs_plugin_extractor::html::html_to_markdown;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 

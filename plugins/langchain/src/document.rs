@@ -104,11 +104,11 @@ impl DocumentMetadata {
         }
     }
 
-    /// Constructs `DocumentMetadata` from extracted [`seleniumbase_rs::extract::PageMetadata`].
+    /// Constructs `DocumentMetadata` from extracted [`seleniumbase_rs_plugin_extractor::html::PageMetadata`].
     #[must_use]
     pub fn from_page_metadata(
         url: impl Into<String>,
-        meta: &seleniumbase_rs::extract::PageMetadata,
+        meta: &seleniumbase_rs_plugin_extractor::html::PageMetadata,
     ) -> Self {
         let url_str = url.into();
         let mut extra = BTreeMap::new();

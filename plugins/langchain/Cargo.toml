@@ -10,6 +10,7 @@ keywords = ["seleniumbase-rs", "plugin", "langchain", "llm", "ai"]
 
 [dependencies]
 seleniumbase-rs = { git = "https://github.com/MustCodeAl/seleniumbase-rs", branch = "main", default-features = false }
+seleniumbase-rs-plugin-extractor = { path = "../extractor" }
 seleniumbase-rs-plugin = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 serde.workspace = true
