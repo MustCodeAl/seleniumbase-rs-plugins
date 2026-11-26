@@ -46,10 +46,11 @@ pub mod types;
 
 pub use auditors::{
     AnchorElement, ComponentStatus, CookieAuditContext, CookieInput, CspDirective, CspPolicy,
-    CspSource, DecodedJwt, DetectedComponent, DomAuditOptions, DomSnapshot, HeaderAuditContext,
-    JsGlobals, JwtAuditResult, PasswordField, ResourceRef, SameSite, ScaResult, ScriptElement,
-    SemVer, SetCookie, StylesheetElement, audit_cookies, audit_dom, audit_headers,
-    audit_headers_map, audit_jwt, audit_sca, audit_set_cookie, decode_jwt, find_jwts_in_text,
+    CspSource, DecodedJwt, DetectedComponent, DomAuditOptions, DomSnapshot, FormInfo,
+    FormInputInfo, HeaderAuditContext, JsGlobals, JwtAuditResult, PasswordField, ResourceRef,
+    SameSite, ScaResult, ScriptElement, SemVer, SetCookie, StylesheetElement, audit_cookies,
+    audit_dom, audit_forms, audit_headers, audit_headers_map, audit_jwt, audit_sca,
+    audit_set_cookie, decode_jwt, find_jwts_in_text, parse_forms_from_value,
 };
 pub use error::{OwaspError, Result};
 #[cfg(feature = "plugin")]

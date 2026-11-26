@@ -1,0 +1,22 @@
+[package]
+name = "seleniumbase-rs-plugin-ocr"
+description = "OCR text extraction plugin interface and model configuration for seleniumbase-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "ocr", "text-extraction"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+async-trait.workspace = true
+dirs = "7.0"
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
+tempfile = "3.27"

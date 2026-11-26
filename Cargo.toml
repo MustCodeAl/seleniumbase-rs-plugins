@@ -17,13 +17,15 @@ members = [
     "plugins/wasm",
     "plugins/antibot-detector",
     "plugins/behavior-dataset",
+    "plugins/cloud-logging",
     "plugins/langchain",
+    "plugins/ocr",
     "plugins/owasp",
 ]
 exclude = ["template"]
 
 [workspace.package]
-version = "0.9.3"
+version = "0.9.4"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"

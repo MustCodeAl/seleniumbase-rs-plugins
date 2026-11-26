@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "antibot-detector"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin",
@@ -1976,7 +1976,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin-testing",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-batcher"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "futures-util",
  "seleniumbase-rs-plugin",
@@ -1999,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-behavior-dataset"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-trait",
  "seleniumbase-rs",
@@ -2013,7 +2013,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-block-resources"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2022,7 +2022,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-browser"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-crx",
@@ -2034,8 +2034,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs-plugin-cloud-logging"
+version = "0.9.4"
+dependencies = [
+ "async-trait",
+ "reqwest",
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-testing",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "seleniumbase-rs-plugin-crawler"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs",
  "seleniumbase-rs-plugin",
@@ -2046,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-crx"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2057,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-extractor"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2067,7 +2083,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-fetcher"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2077,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-imap"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-imap",
  "futures-util",
@@ -2094,7 +2110,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-langchain"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-trait",
  "seleniumbase-rs",
@@ -2107,8 +2123,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs-plugin-ocr"
+version = "0.9.4"
+dependencies = [
+ "async-trait",
+ "dirs",
+ "ring",
+ "seleniumbase-rs-plugin",
+ "seleniumbase-rs-plugin-testing",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "seleniumbase-rs-plugin-owasp"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin",
@@ -2121,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-shield"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2131,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-testing"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin",
@@ -2140,7 +2171,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-tor"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ring",
  "seleniumbase-rs-plugin",
@@ -2154,7 +2185,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-wasm"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2168,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugins-builtin"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-batcher",

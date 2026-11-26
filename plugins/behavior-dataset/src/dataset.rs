@@ -12,7 +12,16 @@ use crate::scenario::{ScenarioKind, ScenarioOutput, simulate_linear_baseline, si
 /// Maximum number of human sessions per generated batch.
 pub const MAX_SAMPLE_COUNT: usize = 10_000;
 
-/// Configuration for deterministic synthetic behavioral dataset generation.
+/// Maximum number of live browser interaction steps per exploration run.
+pub const MAX_LIVE_STEPS: usize = 500;
+
+/// Maximum number of distinct live pages visited per exploration run.
+pub const MAX_LIVE_PAGES: usize = 100;
+
+/// Default benign search and filter phrases typed into live text inputs.
+pub const DEFAULT_TYPING_SAMPLES: [&str; 3] = ["documentation", "pricing", "getting started"];
+
+/// Configuration for synthetic offline batches and live-site behavioral journeys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DatasetConfig {
@@ -29,6 +38,20 @@ pub struct DatasetConfig {
     pub include_baseline_negatives: bool,
     /// Preferred export format for batch serialization.
     pub export_format: ExportFormat,
+    /// Optional starting `http://` or `https://` URL for live browser exploration.
+    /// When `None`, the generator synthesizes offline batches without browser I/O.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Maximum interaction steps to execute across a live-site journey (`1..=500`).
+    pub max_steps: usize,
+    /// Maximum pages to visit via link traversal during a live-site journey (`1..=100`).
+    pub max_pages: usize,
+    /// Restrict followed links to the starting URL's origin during live exploration.
+    pub same_origin_only: bool,
+    /// Dispatch live CDP `Input.*` mouse, scroll, and keyboard events on the page.
+    pub dispatch_live_inputs: bool,
+    /// Benign search or filter phrases typed into discovered non-sensitive text inputs.
+    pub typing_samples: Vec<String>,
 }
 
 impl Default for DatasetConfig {
@@ -40,6 +63,15 @@ impl Default for DatasetConfig {
             scenarios: Vec::new(),
             include_baseline_negatives: false,
             export_format: ExportFormat::JsonlSamples,
+            url: None,
+            max_steps: 12,
+            max_pages: 3,
+            same_origin_only: true,
+            dispatch_live_inputs: true,
+            typing_samples: DEFAULT_TYPING_SAMPLES
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
         }
     }
 }
@@ -49,14 +81,33 @@ impl DatasetConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`DatasetError::InvalidConfig`] when `sample_count` is `0` or
-    /// exceeds [`MAX_SAMPLE_COUNT`].
+    /// Returns [`DatasetError::InvalidConfig`] when numeric bounds or `url` scheme are invalid.
     pub fn validate(&self) -> Result<()> {
         if !(1..=MAX_SAMPLE_COUNT).contains(&self.sample_count) {
             return Err(DatasetError::InvalidConfig(format!(
                 "sample_count must be between 1 and {MAX_SAMPLE_COUNT}, got {}",
                 self.sample_count
             )));
+        }
+        if !(1..=MAX_LIVE_STEPS).contains(&self.max_steps) {
+            return Err(DatasetError::InvalidConfig(format!(
+                "max_steps must be between 1 and {MAX_LIVE_STEPS}, got {}",
+                self.max_steps
+            )));
+        }
+        if !(1..=MAX_LIVE_PAGES).contains(&self.max_pages) {
+            return Err(DatasetError::InvalidConfig(format!(
+                "max_pages must be between 1 and {MAX_LIVE_PAGES}, got {}",
+                self.max_pages
+            )));
+        }
+        if let Some(url) = &self.url {
+            let lower = url.trim().to_ascii_lowercase();
+            if !lower.starts_with("http://") && !lower.starts_with("https://") {
+                return Err(DatasetError::InvalidConfig(format!(
+                    "url must start with http:// or https://, got `{url}`"
+                )));
+            }
         }
         Ok(())
     }
@@ -89,6 +140,15 @@ pub struct DatasetSample {
     pub features: TrajectoryFeatures,
     /// Full chronological event timeline.
     pub events: Vec<BehaviorEvent>,
+    /// Starting page URL when recorded during a live browser journey.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_url: Option<String>,
+    /// Ordered high-level action descriptors recorded during a live journey.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub action_path: Vec<String>,
+    /// Ordered CSS selectors of DOM targets interacted with during a live journey.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_selectors: Vec<String>,
 }
 
 /// Collection of generated human (and optional synthetic baseline) samples.
@@ -339,7 +399,28 @@ fn build_sample(
         summary,
         features,
         events: output.events,
+        page_url: None,
+        action_path: Vec::new(),
+        target_selectors: Vec::new(),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_live_sample(
+    sample_id: String,
+    profile: PersonaProfile,
+    scenario: ScenarioKind,
+    seed: u64,
+    output: ScenarioOutput,
+    page_url: Option<String>,
+    action_path: Vec<String>,
+    target_selectors: Vec<String>,
+) -> DatasetSample {
+    let mut sample = build_sample(sample_id, true, Some(profile), scenario, seed, output);
+    sample.page_url = page_url;
+    sample.action_path = action_path;
+    sample.target_selectors = target_selectors;
+    sample
 }
 
 /// SplitMix64 mixing so `(base_seed, index)` streams remain uncorrelated across adjacent seeds.

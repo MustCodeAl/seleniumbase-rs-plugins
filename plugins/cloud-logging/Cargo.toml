@@ -1,0 +1,24 @@
+[package]
+name = "seleniumbase-rs-plugin-cloud-logging"
+description = "Cloud artifact uploader plugin (GCS and Azure Blob Storage) for seleniumbase-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "gcs", "azure", "logging"]
+
+[dependencies]
+seleniumbase-rs-plugin.workspace = true
+async-trait.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+url = "2.5"
+
+[dev-dependencies]
+seleniumbase-rs-plugin-testing.workspace = true
+tempfile = "3.27"
+tokio = { workspace = true, features = ["rt", "macros"] }

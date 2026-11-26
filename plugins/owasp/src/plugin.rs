@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use crate::auditors::cookies::{CookieAuditContext, CookieInput, audit_cookies, audit_set_cookie};
 use crate::auditors::dom::{DomAuditOptions, DomSnapshot, audit_dom};
+use crate::auditors::forms::{audit_forms, parse_forms_from_value};
 use crate::auditors::headers::{HeaderAuditContext, audit_headers};
 use crate::auditors::sca::{DetectedComponent, audit_sca};
 use crate::error::{OwaspError, Result};
@@ -31,10 +32,11 @@ pub const DEFAULT_MAX_OBSERVED_RESPONSES: usize = 1_024;
 /// Maximum passive findings kept in memory per session by default.
 pub const DEFAULT_MAX_FINDINGS: usize = 2_048;
 
-/// Read-only browser page snapshot script evaluated via [`PageHandle::evaluate`].
-/// Collects URL, DOM element inventories, HTML comments, storage entries, cookies,
-/// runtime JS library globals, and optional passive `window.PTK_AGENT` status.
-const PAGE_AUDIT_JS: &str = r#"(() => {
+/// Read-only async browser page snapshot script evaluated via [`PageHandle::evaluate`].
+/// Collects URL, DOM element inventories, `<form>`/`<input>` posture metadata, HTML comments,
+/// storage entries, cookies, runtime JS library globals, and awaits async `window.PTK_AGENT`
+/// bridge methods (`scanStatus` / `getScanStatus`, `getFindings`, `exportFullReport`).
+const PAGE_AUDIT_JS: &str = r#"(async () => {
   const MAX_ITEMS = 500;
   const MAX_CODE = 32768;
   const url = typeof location !== "undefined" ? String(location.href || "") : "";
@@ -114,12 +116,45 @@ const PAGE_AUDIT_JS: &str = r#"(() => {
     bootstrap: (window.bootstrap && window.bootstrap.Tooltip && window.bootstrap.Tooltip.VERSION) || (window.jQuery && window.jQuery.fn && window.jQuery.fn.tooltip && window.jQuery.fn.tooltip.Constructor && window.jQuery.fn.tooltip.Constructor.VERSION) || null,
     vue: (window.Vue && window.Vue.version) || null,
   };
+  const forms = [];
+  for (const formEl of Array.from(document.querySelectorAll("form")).slice(0, MAX_ITEMS)) {
+    const inputs = [];
+    for (const inEl of Array.from(formEl.querySelectorAll("input, textarea")).slice(0, MAX_ITEMS)) {
+      inputs.push({
+        type: (inEl.tagName === "TEXTAREA" ? "textarea" : (inEl.getAttribute("type") || "text")).toLowerCase(),
+        name: inEl.getAttribute("name") || null,
+        id: inEl.getAttribute("id") || null,
+        autocomplete: inEl.getAttribute("autocomplete") || null,
+      });
+    }
+    forms.push({
+      action: formEl.getAttribute("action") || null,
+      method: (formEl.getAttribute("method") || "GET").toUpperCase(),
+      id: formEl.getAttribute("id") || null,
+      name: formEl.getAttribute("name") || null,
+      inputs,
+    });
+  }
   let ptkAgent = null;
   try {
-    if (window.PTK_AGENT && typeof window.PTK_AGENT.scanStatus === "function") {
-      const scanStatus = window.PTK_AGENT.scanStatus({});
-      const findingsResponse = typeof window.PTK_AGENT.getFindings === "function" ? window.PTK_AGENT.getFindings({ limit: 200 }) : null;
-      ptkAgent = { scanStatus, findingsResponse };
+    const agent = window.PTK_AGENT;
+    if (agent) {
+      const statusFn = typeof agent.scanStatus === "function"
+        ? agent.scanStatus.bind(agent)
+        : (typeof agent.getScanStatus === "function" ? agent.getScanStatus.bind(agent) : null);
+      if (statusFn) {
+        const scanStatus = await Promise.resolve(statusFn({}));
+        const findingsResponse = typeof agent.getFindings === "function"
+          ? await Promise.resolve(agent.getFindings({ limit: 200 }))
+          : null;
+        let exportPlan = null;
+        if (typeof agent.exportFullReport === "function") {
+          try {
+            exportPlan = await Promise.resolve(agent.exportFullReport({ engine: "ALL", transfer: "retrieval-plan" }));
+          } catch (_) {}
+        }
+        ptkAgent = { scanStatus, findingsResponse, exportPlan };
+      }
     }
   } catch (_) {}
   let documentCookie = "";
@@ -134,6 +169,7 @@ const PAGE_AUDIT_JS: &str = r#"(() => {
     links,
     active_elements,
     passive_elements,
+    forms,
     comments,
     localStorage: readStorage(window.localStorage),
     sessionStorage: readStorage(window.sessionStorage),
@@ -154,6 +190,8 @@ pub struct OwaspConfig {
     pub jwt: bool,
     /// Enable passive DOM, mixed content, SRI, storage, and `postMessage` auditing.
     pub dom: bool,
+    /// Enable passive `<form>` and `<input>` posture auditing (transport, method, CSRF token, autocomplete).
+    pub forms: bool,
     /// Enable passive client-side SCA library/version and EOL auditing.
     pub sca: bool,
     /// Optional OWASP PTK extension and `modules.json` configuration.
@@ -177,6 +215,7 @@ impl Default for OwaspConfig {
             cookies: true,
             jwt: true,
             dom: true,
+            forms: true,
             sca: true,
             ptk: None,
             observe_urls: Vec::new(),
@@ -238,6 +277,13 @@ impl OwaspConfig {
     #[must_use]
     pub fn dom(mut self, enabled: bool) -> Self {
         self.dom = enabled;
+        self
+    }
+
+    /// Enables or disables passive `<form>` and `<input>` posture auditing.
+    #[must_use]
+    pub fn forms(mut self, enabled: bool) -> Self {
+        self.forms = enabled;
         self
     }
 
@@ -478,6 +524,7 @@ impl AuditSession {
 #[serde(default, deny_unknown_fields)]
 struct AuditTaskInput {
     /// Optional URL to navigate to before running the active page audit.
+    #[serde(alias = "target_url")]
     url: Option<String>,
     /// Optional HTTP response headers supplied directly alongside page inspection.
     headers: Option<BTreeMap<String, String>>,
@@ -690,6 +737,14 @@ impl OwaspPlugin {
                 audit_storage: true,
             };
             findings.extend(audit_dom(&snapshot, &dom_opts));
+        }
+
+        // Passive `<form>` and `<input>` posture audit
+        if self.config.forms {
+            let forms = parse_forms_from_value(&eval_reply);
+            if !forms.is_empty() {
+                findings.extend(audit_forms(&resolved_url, &forms));
+            }
         }
 
         // Passive SCA library/version & EOL advisory audit

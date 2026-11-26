@@ -3,6 +3,29 @@
 All notable changes to the crates in this repository. The crates share one
 version across all published plugins and plugin crates.
 
+## [0.9.4] - 2026-11-26
+
+### Added
+
+- `seleniumbase-rs-plugin-behavior-dataset`: added live-site user journey exploration
+  (`live::SiteExplorer`, `BehaviorDatasetPlugin::explore_page`, `DISCOVER_SITE_ELEMENTS_JS`)
+  discovering visible DOM targets, dispatching curved minimum-jerk pointer trajectories,
+  wheel scrolls, and keystroke-by-keystroke typing via CDP `Input.*` (with safe JS
+  fallback on non-CDP handles), following same-origin links up to `max_pages`, and
+  recording `page_url`, `action_path`, and `target_selectors` on `DatasetSample`, while
+  retaining offline batch synthesis when `url` is `None`.
+- `seleniumbase-rs-plugin-owasp`: rewrote `PAGE_AUDIT_JS` as an async IIFE awaiting
+  `window.PTK_AGENT` Promise-returning methods (`scanStatus`/`getScanStatus`,
+  `getFindings`, `exportFullReport` retrieval plan), added `target_url` alias support in
+  `Task::run`, and added passive `auditors::forms` (`OwaspConfig::forms`) checking form
+  `action` transport, `GET` password forms, missing CSRF hidden fields on `POST` forms,
+  and missing `autocomplete` on sensitive inputs.
+- `seleniumbase-rs-plugin-cloud-logging`: new standalone plugin crate for uploading test
+  artifacts to Google Cloud Storage (`GcsUploader`) and Azure Blob Storage
+  (`AzureBlobUploader`) on `on_close` or `Task::run`.
+- `seleniumbase-rs-plugin-ocr`: new standalone plugin crate for OCR model cache
+  resolution (`OCR_MODELS`, `resolve_models_dir`), PNG header validation, and `Task::run`.
+
 ## [0.9.3] - 2026-11-25
 
 ### Added

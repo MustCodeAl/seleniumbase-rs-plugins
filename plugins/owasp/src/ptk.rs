@@ -1281,6 +1281,9 @@ pub struct PtkAgentSnapshot {
     pub truncated: bool,
     /// Passive findings returned by `window.PTK_AGENT`.
     pub findings: Vec<PtkFinding>,
+    /// Optional retrieval-plan metadata returned by `window.PTK_AGENT.exportFullReport`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_plan: Option<Value>,
 }
 
 impl PtkAgentSnapshot {
@@ -1330,6 +1333,12 @@ impl PtkAgentSnapshot {
             }
         }
 
+        let export_plan = obj
+            .get("exportPlan")
+            .or_else(|| obj.get("exportResponse"))
+            .filter(|v| !v.is_null())
+            .cloned();
+
         Ok(Self {
             ok,
             session_id,
@@ -1338,6 +1347,7 @@ impl PtkAgentSnapshot {
             error_message,
             truncated,
             findings,
+            export_plan,
         })
     }
 

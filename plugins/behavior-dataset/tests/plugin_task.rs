@@ -31,8 +31,9 @@ fn plugin_metadata_requirements_and_registry_configuration() {
     let meta = BehaviorDatasetPlugin::describe();
     assert_eq!(meta.category, Some(Category::Core));
     assert!(meta.capabilities.covers(&Capability::Task));
-    assert!(!meta.capabilities.covers(&Capability::PageNavigate));
-    assert!(!meta.capabilities.covers(&Capability::PageEvaluate));
+    assert!(meta.capabilities.covers(&Capability::PageEvaluate));
+    assert!(meta.capabilities.covers(&Capability::PageNavigate));
+    assert!(meta.capabilities.covers(&Capability::Cdp("Input".into())));
 
     let plugin = BehaviorDatasetPlugin::configure(&Value::Null).unwrap();
     assert_eq!(*plugin.config(), DatasetConfig::default());
@@ -64,6 +65,7 @@ fn task_runs_deterministically_without_live_browser_io_and_records_to_sink() {
         scenarios: vec![ScenarioKind::FormEntry, ScenarioKind::TargetApproachClick],
         include_baseline_negatives: true,
         export_format: ExportFormat::CsvFeatures,
+        ..DatasetConfig::default()
     };
     let plugin = BehaviorDatasetPlugin::new(config).unwrap();
     let set = PluginSet::strict().with(plugin).unwrap();

@@ -2,6 +2,7 @@
 
 pub mod cookies;
 pub mod dom;
+pub mod forms;
 pub mod headers;
 pub mod jwt;
 pub mod sca;
@@ -13,6 +14,7 @@ pub use dom::{
     AnchorElement, DomAuditOptions, DomSnapshot, JsGlobals, PasswordField, ResourceRef,
     ScriptElement, StylesheetElement, audit_dom,
 };
+pub use forms::{FormInfo, FormInputInfo, audit_forms, parse_forms_from_value};
 pub use headers::{
     CspDirective, CspPolicy, CspSource, HeaderAuditContext, audit_headers, audit_headers_map,
 };

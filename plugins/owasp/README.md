@@ -19,6 +19,7 @@ This crate performs **100% passive posture inspection and reporting**:
   - `cookies`: `HttpOnly`, `Secure`, `SameSite`, `__Host-`/`__Secure-` prefix rules, over-broad `Domain`, `document.cookie` session exposure, and `[redacted]` awareness when `net.sensitive` is withheld.
   - `jwt`: passive Base64URL header/claims decoder checking `alg: none`, `jku`/`x5u` headers, missing/excessive `exp`, and unencrypted PII/credential claims.
   - `dom`: passive mixed `http://` content checks, missing third-party SRI `integrity`, `target="_blank"` missing `rel="noopener noreferrer"`, Web Storage & HTML comment secret/JWT exposure, and `postMessage('*')` / DOM sink inventory.
+  - `forms`: passive `<form>` and `<input>` posture checks for `http://` form actions, password fields on `http://` or `method="GET"`, `POST` forms lacking hidden CSRF token fields, and sensitive inputs missing `autocomplete`.
   - `sca`: passive client-side library & version detection (`jQuery`, `Angular`, `React`, `Lodash`, `Bootstrap`, `Vue`) with offline EOL/outdated advisory lookup.
 - **Reporting (`report`)**:
   - `OwaspAuditReport` with severity totals, OWASP Top 10:2021 (`A01`–`A10`) breakdown, WSTG v4.2 references, Markdown summary, PTK JSON, and SARIF v2.1.0 JSON export.

@@ -40,6 +40,7 @@ pub mod error;
 pub mod event;
 pub mod export;
 pub mod features;
+pub mod live;
 pub mod persona;
 pub mod scenario;
 
@@ -47,12 +48,17 @@ pub mod scenario;
 pub mod plugin;
 
 pub use dataset::{
-    DatasetBatch, DatasetBatchGenerator, DatasetConfig, DatasetSample, MAX_SAMPLE_COUNT,
+    DEFAULT_TYPING_SAMPLES, DatasetBatch, DatasetBatchGenerator, DatasetConfig, DatasetSample,
+    MAX_LIVE_PAGES, MAX_LIVE_STEPS, MAX_SAMPLE_COUNT,
 };
 pub use error::{DatasetError, Result};
 pub use event::{BehaviorEvent, EventKind, reconstruct_field_texts, reconstruct_typed_text};
 pub use export::{ExportFormat, JsonlEventRow};
 pub use features::{SessionSummary, TrajectoryFeatures};
+pub use live::{
+    DISCOVER_SITE_ELEMENTS_JS, DiscoveredElement, ElementRole, SiteActionStep,
+    SiteExplorationReport, SiteExplorer, SiteVisitSummary,
+};
 pub use persona::{PersonaKind, PersonaProfile};
 pub use scenario::{
     ScenarioKind, ScenarioOutput, simulate_linear_baseline, simulate_linear_target_approach,

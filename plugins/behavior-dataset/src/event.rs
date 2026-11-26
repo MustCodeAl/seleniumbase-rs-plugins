@@ -114,6 +114,10 @@ impl TimelineBuilder {
         self.timestamp_ms
     }
 
+    pub(crate) fn event_count(&self) -> usize {
+        self.events.len()
+    }
+
     pub(crate) fn finish(self) -> Vec<BehaviorEvent> {
         self.events
     }
