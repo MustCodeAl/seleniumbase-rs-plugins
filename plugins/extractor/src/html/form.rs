@@ -119,5 +119,25 @@ mod tests {
         assert_eq!(data.get("email"), Some("test@example.com"));
         assert_eq!(data.get("age"), Some("28"));
         assert_eq!(data.get("subscribe"), Some("true"));
+        assert_eq!(data.len(), 3);
+        assert!(!data.is_empty());
+
+        let mut manual = FormData::new();
+        assert!(manual.is_empty());
+        manual.insert("k1", "v1");
+        manual.insert("k2", "v2");
+        assert_eq!(manual.len(), 2);
+        let pairs: Vec<(&str, &str)> = manual.iter().collect();
+        assert_eq!(pairs, vec![("k1", "v1"), ("k2", "v2")]);
+
+        let mixed = serde_json::json!({
+            "opt": null,
+            "tags": ["a", "b"],
+            "name": "bob"
+        });
+        let mixed_data = FormData::from_serializable(&mixed).unwrap();
+        assert_eq!(mixed_data.get("opt"), Some(""));
+        assert_eq!(mixed_data.get("tags"), Some("[\"a\",\"b\"]"));
+        assert_eq!(mixed_data.get("name"), Some("bob"));
     }
 }

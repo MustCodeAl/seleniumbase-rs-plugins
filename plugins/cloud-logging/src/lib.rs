@@ -139,10 +139,7 @@ impl GcsUploader {
         )
         .map_err(|err| CloudUploadError::InvalidTarget(format!("invalid GCS URL: {err}")))?;
 
-        let client = Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .read_timeout(std::time::Duration::from_secs(120))
-            .build()?;
+        let client = build_http_client()?;
         let response = client
             .post(url.as_str())
             .header("Authorization", format!("Bearer {}", self.token))
@@ -239,10 +236,7 @@ impl AzureBlobUploader {
     /// [`CloudUploadError::Upload`] on failure.
     pub async fn upload(&self, path: impl AsRef<Path>) -> Result<()> {
         let bytes = fs::read(path.as_ref()).await?;
-        let client = Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .read_timeout(std::time::Duration::from_secs(120))
-            .build()?;
+        let client = build_http_client()?;
         let response = client
             .put(&self.sas_url)
             .header("x-ms-blob-type", "BlockBlob")
@@ -400,8 +394,114 @@ async fn upload_artifact(
     }
 }
 
+fn build_http_client() -> Result<Client> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    Ok(Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(120))
+        .build()?)
+}
+
 fn required_var(lookup: &impl Fn(&str) -> Option<String>, name: &'static str) -> Result<String> {
     lookup(name)
         .filter(|value| !value.trim().is_empty())
         .ok_or(CloudUploadError::MissingEnv(name))
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use tokio::net::TcpListener;
+
+    #[test]
+    fn uploader_validation_debug_and_plugin_config_work() {
+        let gcs = GcsUploader::from_lookup(|k| match k {
+            "SB_GCS_BUCKET" => Some("my-bucket".to_owned()),
+            "GCS_ACCESS_TOKEN" => Some("secret-tok".to_owned()),
+            _ => None,
+        })
+        .expect("gcs uploader");
+        assert_eq!(gcs.bucket(), "my-bucket");
+        let dbg = format!("{gcs:?}");
+        assert!(dbg.contains("my-bucket") && !dbg.contains("secret-tok"));
+
+        assert!(matches!(
+            GcsUploader::from_lookup(|_| Some("  ".to_owned())),
+            Err(CloudUploadError::MissingEnv("SB_GCS_BUCKET"))
+        ));
+
+        for bad in [
+            "not-a-url",
+            "https://acct.blob.core.windows.net/",
+            "https://acct.blob.core.windows.net/container-only",
+            "https://acct.blob.core.windows.net/container/blob.bin",
+        ] {
+            assert!(
+                matches!(
+                    AzureBlobUploader::from_lookup(|_| Some(bad.to_owned())),
+                    Err(CloudUploadError::InvalidTarget(_))
+                ),
+                "expected InvalidTarget for {bad}"
+            );
+        }
+
+        let az = AzureBlobUploader::from_lookup(|_| {
+            Some("https://acct.blob.core.windows.net/logs/run.zip?sv=2024".to_owned())
+        })
+        .expect("azure uploader");
+        assert_eq!(az.blob_name(), "run.zip");
+        let az_dbg = format!("{az:?}");
+        assert!(az_dbg.contains("run.zip") && !az_dbg.contains("sv=2024"));
+
+        let plugin = CloudLoggingPlugin::configure(&json!({
+            "provider": "azure",
+            "object_name": "out.bin"
+        }))
+        .expect("configure");
+        assert_eq!(plugin.name(), NAME);
+        assert_eq!(plugin.config().provider, CloudProvider::Azure);
+        assert_eq!(plugin.requirements(), Requirements::empty());
+        assert_eq!(plugin.metadata().category, Some(Category::Core));
+        assert!(plugin.task().is_some());
+    }
+
+    #[tokio::test]
+    async fn azure_upload_succeeds_and_reports_http_failure_against_loopback() {
+        let dir = std::env::temp_dir();
+        let file = dir.join(format!("sbrs-cloud-test-{}.bin", std::process::id()));
+        std::fs::write(&file, b"artifact-bytes").expect("write temp file");
+
+        async fn serve_once(status_line: &'static str, body: &'static str) -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let addr = listener.local_addr().expect("addr");
+            tokio::spawn(async move {
+                if let Ok((mut sock, _)) = listener.accept().await {
+                    let mut buf = [0u8; 1024];
+                    let _ = sock.read(&mut buf).await;
+                    let resp = format!(
+                        "HTTP/1.1 {status_line}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                }
+            });
+            format!("http://{addr}/logs/test.bin?sig=abc")
+        }
+
+        let ok_url = serve_once("201 Created", "ok").await;
+        let ok_uploader = AzureBlobUploader::from_lookup(|_| Some(ok_url.clone())).expect("ok");
+        ok_uploader.upload(&file).await.expect("201 upload");
+
+        let err_url = serve_once("403 Forbidden", "denied").await;
+        let err_uploader = AzureBlobUploader::from_lookup(|_| Some(err_url.clone())).expect("err");
+        let err = err_uploader.upload(&file).await.expect_err("403 must fail");
+        assert!(matches!(err, CloudUploadError::Upload { status: 403, .. }));
+
+        // on_close with no artifact_path is a no-op.
+        let plugin = CloudLoggingPlugin::default();
+        plugin.on_close().await.expect("noop on_close");
+
+        let _ = std::fs::remove_file(&file);
+    }
 }

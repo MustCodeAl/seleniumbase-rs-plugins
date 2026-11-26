@@ -214,3 +214,31 @@ impl Task for OcrPlugin {
         Ok(summary)
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn validates_png_sha256_models_dir_and_plugin_metadata() {
+        assert!(validate_png_header(b"\x89PNG\r\n\x1a\nrest").is_ok());
+        assert!(validate_png_header(b"short").is_err());
+        assert!(validate_png_header(b"NOT_A_PNG_FILE").is_err());
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+
+        let explicit = PathBuf::from("/tmp/custom-ocr-models");
+        assert_eq!(resolve_models_dir(Some(&explicit)).unwrap(), explicit);
+        let default_dir = resolve_models_dir(None).unwrap();
+        assert!(!default_dir.as_os_str().is_empty());
+
+        let plugin = OcrPlugin::configure(&json!({ "models_dir": "/tmp/ocr" })).unwrap();
+        assert_eq!(plugin.name(), NAME);
+        assert_eq!(plugin.config().models_dir, Some(PathBuf::from("/tmp/ocr")));
+        assert_eq!(plugin.requirements(), Requirements::empty());
+        assert_eq!(plugin.metadata().category, Some(Category::Core));
+        assert!(plugin.task().is_some());
+    }
+}

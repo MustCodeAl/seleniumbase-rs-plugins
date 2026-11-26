@@ -2049,6 +2049,7 @@ version = "0.9.4"
 dependencies = [
  "async-trait",
  "reqwest",
+ "rustls",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
  "serde",
