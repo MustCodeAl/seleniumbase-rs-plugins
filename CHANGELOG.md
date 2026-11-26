@@ -3,6 +3,12 @@
 All notable changes to the crates in this repository. The crates share one
 version across all published plugins and plugin crates.
 
+## [0.10.0] - unreleased
+
+### Changed
+
+- `seleniumbase-rs-plugin-behavior-dataset`: migrated `Behavior`, `Humanizer`, `KeyAction`, and `Rng` imports from removed `seleniumbase_rs::evasion::{behavior, humanize}` to `seleniumbase_rs::sb_cdp::human::{behavior, humanize}` for compatibility with `seleniumbase-rs` 0.10.0.
+
 ## [0.9.4] - 2026-11-26
 
 ### Added

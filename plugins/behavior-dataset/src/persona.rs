@@ -3,8 +3,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-use seleniumbase_rs::evasion::behavior::{Behavior, Humanizer};
-use seleniumbase_rs::evasion::humanize::Rng;
+use seleniumbase_rs::sb_cdp::human::behavior::{Behavior, Humanizer};
+use seleniumbase_rs::sb_cdp::human::humanize::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{DatasetError, Result};
@@ -277,7 +277,7 @@ impl PersonaProfile {
     /// # Errors
     ///
     /// Returns [`DatasetError::InvalidBehavior`] if any numeric parameter falls
-    /// outside [`BehaviorBuilder`](seleniumbase_rs::evasion::behavior::BehaviorBuilder)'s bounds.
+    /// outside [`BehaviorBuilder`](seleniumbase_rs::sb_cdp::human::behavior::BehaviorBuilder)'s bounds.
     pub fn to_behavior(&self) -> Result<Behavior> {
         let behavior = Behavior::builder()
             .typing_wpm(self.typing_wpm)

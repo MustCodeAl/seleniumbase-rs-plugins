@@ -1,9 +1,9 @@
 //! Synthetic human-like web behavior generator and batch ML dataset exporter
 //! for `seleniumbase-rs`.
 //!
-//! Built directly on [`seleniumbase_rs::evasion::behavior`] (`Behavior`,
+//! Built directly on [`seleniumbase_rs::sb_cdp::human::behavior`] (`Behavior`,
 //! `BehaviorBuilder`, `Humanizer`, `KeyAction`, `Keystroke`, `Step`,
-//! `WheelNotch`) and [`seleniumbase_rs::evasion::humanize::Rng`], this crate
+//! `WheelNotch`) and [`seleniumbase_rs::sb_cdp::human::humanize::Rng`], this crate
 //! synthesizes realistic multi-persona interaction timelines, extracts
 //! kinematic and Fitts's-law ML feature vectors, optionally pairs them with
 //! synthetic linear baseline negatives, and exports JSON, streaming JSONL,

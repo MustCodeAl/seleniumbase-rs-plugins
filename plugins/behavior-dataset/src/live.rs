@@ -4,8 +4,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-use seleniumbase_rs::evasion::behavior::{Humanizer, KeyAction};
-use seleniumbase_rs::evasion::humanize::Rng;
+use seleniumbase_rs::sb_cdp::human::behavior::{Humanizer, KeyAction};
+use seleniumbase_rs::sb_cdp::human::humanize::Rng;
 use seleniumbase_rs::sb_cdp::{Point, Rect};
 #[cfg(feature = "plugin")]
 use seleniumbase_rs_plugin::{Engine, PageHandle, PluginError, Result as PluginResult};

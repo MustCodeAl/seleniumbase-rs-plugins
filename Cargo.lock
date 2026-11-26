@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "antibot-detector"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin",
@@ -1954,8 +1954,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "seleniumbase-rs"
+version = "0.10.0"
+source = "git+https://github.com/MustCodeAl/seleniumbase-rs?branch=feat%2Fv0.10-core-split#502f84a1aba465ca514fc5575cf90fec45de0427"
+dependencies = [
+ "anstream",
+ "async-trait",
+ "base64",
+ "bytes",
+ "dirs",
+ "figment",
+ "flate2",
+ "futures-util",
+ "http",
+ "indicatif",
+ "jiff",
+ "owo-colors",
+ "rand",
+ "rand_distr",
+ "regex",
+ "reqwest",
+ "ring",
+ "rustls",
+ "scraper",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thirtyfour",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "toml",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+ "url",
+ "which",
+ "zip",
+]
+
+[[package]]
 name = "seleniumbase-rs-plugin"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin-testing",
@@ -1966,7 +2007,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-batcher"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "futures-util",
  "seleniumbase-rs-plugin",
@@ -1978,10 +2019,10 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-behavior-dataset"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
- "seleniumbase-rs",
+ "seleniumbase-rs 0.10.0",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
  "serde",
@@ -1992,7 +2033,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-block-resources"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2001,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-browser"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-crx",
@@ -2014,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-cloud-logging"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -2031,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-crawler"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2041,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-crx"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2052,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-extractor"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "scraper",
  "seleniumbase-rs-plugin",
@@ -2064,7 +2105,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-fetcher"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2074,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-imap"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-imap",
  "futures-util",
@@ -2091,10 +2132,10 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-langchain"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
- "seleniumbase-rs",
+ "seleniumbase-rs 0.9.4",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-extractor",
  "seleniumbase-rs-plugin-testing",
@@ -2106,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-ocr"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "dirs",
@@ -2121,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-owasp"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin",
@@ -2134,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-shield"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2144,7 +2185,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-testing"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "seleniumbase-rs-plugin",
@@ -2153,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-tor"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "ring",
  "seleniumbase-rs-plugin",
@@ -2167,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugin-wasm"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
@@ -2181,7 +2222,7 @@ dependencies = [
 
 [[package]]
 name = "seleniumbase-rs-plugins-builtin"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-batcher",

@@ -25,26 +25,26 @@ members = [
 exclude = ["template"]
 
 [workspace.package]
-version = "0.9.4"
+version = "0.10.0"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
 repository = "https://github.com/MustCodeAl/seleniumbase-rs-plugins"
 
 [workspace.dependencies]
-seleniumbase-rs = { git = "https://github.com/MustCodeAl/seleniumbase-rs", branch = "main", default-features = false }
+seleniumbase-rs = { git = "https://github.com/MustCodeAl/seleniumbase-rs", branch = "feat/v0.10-core-split", default-features = false }
 seleniumbase-rs-plugin = { path = "crates/seleniumbase-rs-plugin" }
 seleniumbase-rs-plugin-testing = { path = "crates/seleniumbase-rs-plugin-testing" }
-seleniumbase-rs-plugin-batcher = { path = "plugins/batcher", version = "0.9.3" }
-seleniumbase-rs-plugin-block-resources = { path = "plugins/block-resources", version = "0.9.3" }
-seleniumbase-rs-plugin-browser = { path = "plugins/browser", version = "0.9.3" }
-seleniumbase-rs-plugin-crawler = { path = "plugins/crawler", version = "0.9.3" }
-seleniumbase-rs-plugin-crx = { path = "plugins/crx", version = "0.9.3" }
-seleniumbase-rs-plugin-extractor = { path = "plugins/extractor", version = "0.9.3" }
-seleniumbase-rs-plugin-fetcher = { path = "plugins/fetcher", version = "0.9.3" }
-seleniumbase-rs-plugin-imap = { path = "plugins/imap", version = "0.9.3" }
-seleniumbase-rs-plugin-shield = { path = "plugins/shield", version = "0.9.3" }
-seleniumbase-rs-plugin-tor = { path = "plugins/tor", version = "0.9.3" }
+seleniumbase-rs-plugin-batcher = { path = "plugins/batcher", version = "0.10.0" }
+seleniumbase-rs-plugin-block-resources = { path = "plugins/block-resources", version = "0.10.0" }
+seleniumbase-rs-plugin-browser = { path = "plugins/browser", version = "0.10.0" }
+seleniumbase-rs-plugin-crawler = { path = "plugins/crawler", version = "0.10.0" }
+seleniumbase-rs-plugin-crx = { path = "plugins/crx", version = "0.10.0" }
+seleniumbase-rs-plugin-extractor = { path = "plugins/extractor", version = "0.10.0" }
+seleniumbase-rs-plugin-fetcher = { path = "plugins/fetcher", version = "0.10.0" }
+seleniumbase-rs-plugin-imap = { path = "plugins/imap", version = "0.10.0" }
+seleniumbase-rs-plugin-shield = { path = "plugins/shield", version = "0.10.0" }
+seleniumbase-rs-plugin-tor = { path = "plugins/tor", version = "0.10.0" }
 async-trait = "0.1"
 ring = "0.17"
 serde = { version = "1", features = ["derive"] }
