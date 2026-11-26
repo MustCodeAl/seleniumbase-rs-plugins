@@ -10,7 +10,6 @@ keywords = ["seleniumbase-rs", "plugin", "crawler", "testing"]
 
 [dependencies]
 seleniumbase-rs-plugin.workspace = true
-seleniumbase-rs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

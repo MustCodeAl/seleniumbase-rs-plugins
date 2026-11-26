@@ -25,6 +25,14 @@ version across all published plugins and plugin crates.
   (`AzureBlobUploader`) on `on_close` or `Task::run`.
 - `seleniumbase-rs-plugin-ocr`: new standalone plugin crate for OCR model cache
   resolution (`OCR_MODELS`, `resolve_models_dir`), PNG header validation, and `Task::run`.
+- `seleniumbase-rs-plugin-extractor`: added offline `html` extraction module (`markdown`,
+  `metadata`, `json_ld`, `table`, `form`) backed by `ExtractError`, plus optional `ai`
+  feature (`AiPromptBuilder`, `parse_ai_response`, `parse_ai_records`) without an HTTP client.
+
+### Changed
+
+- `seleniumbase-rs-plugin-crawler`: removed dependency on `seleniumbase-rs` core `crawler`
+  types by restoring self-contained `robots` and `sitemap` implementations.
 
 ## [0.9.3] - 2026-11-25
 

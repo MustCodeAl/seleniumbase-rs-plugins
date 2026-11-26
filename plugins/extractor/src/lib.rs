@@ -46,6 +46,10 @@
 //! Microdata, `<label>` and header-less layouts are not anchors yet; those
 //! pages fall back to the structural signature, or to a `select` map.
 
+#[cfg(feature = "ai")]
+pub mod ai;
+pub mod error;
+pub mod html;
 mod request;
 mod schema;
 mod values;

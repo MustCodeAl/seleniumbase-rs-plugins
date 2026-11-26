@@ -109,6 +109,22 @@ pages in turn. Each page records one line to the sink (the answer above plus
 before a tab opens; a page that fails afterwards does not stop the others; a
 missing capability does. At most 10000 pages and a pause of at most 60 s.
 
+## Offline HTML helpers and `ai` feature
+
+The crate also exposes pure offline HTML extraction helpers under `html` (with no
+browser required):
+
+- `html::markdown::{html_to_markdown, MarkdownOptions}`: clean Markdown for LLMs and RAG.
+- `html::metadata::PageMetadata`: title, description, OpenGraph, Twitter Card, and canonical links.
+- `html::json_ld::{extract_json_ld, extract_json_ld_raw}`: typed and raw JSON-LD blocks.
+- `html::table::TableData`: HTML table header/row extraction and typed record deserialization.
+- `html::form::FormData`: strongly typed form field serialization.
+
+Enable the optional `ai` Cargo feature (`features = ["ai"]`) for the provider-agnostic
+`ai` module (`AiPromptBuilder`, `AiExtractionPrompt`, `object_schema`,
+`parse_ai_response`, `parse_ai_records`). It builds structured JSON-Schema prompts and
+parses fenced or raw JSON replies without bundling an HTTP client.
+
 ## Not covered
 
 - `auto_save` (writing each page's records as an artifact) waits for an artifact
