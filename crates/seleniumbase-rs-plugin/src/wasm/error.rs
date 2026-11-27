@@ -2,9 +2,9 @@
 
 use std::path::PathBuf;
 
-use seleniumbase_rs_plugin::PluginError;
+use crate::PluginError;
 
-use crate::ABI_VERSION;
+use super::ABI_VERSION;
 
 /// Why the host refused a WebAssembly plugin module.
 ///
@@ -22,7 +22,7 @@ pub enum WasmError {
         /// What the operating system said.
         source: std::io::Error,
     },
-    /// The module is bigger than [`Limits::max_module_bytes`](crate::Limits::max_module_bytes).
+    /// The module is bigger than [`Limits::max_module_bytes`](super::Limits::max_module_bytes).
     #[error("the module is {size} bytes, more than the limit of {limit}")]
     ModuleTooLarge {
         /// The module's size in bytes (for a file, at least this many).

@@ -18,7 +18,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
-use crate::config::ControlAuth;
+use super::config::ControlAuth;
 
 /// The longest line read from the control port.
 const MAX_LINE: u64 = 4096;
@@ -500,7 +500,7 @@ async fn password_login(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::run;
+    use crate::tor::run;
 
     async fn reply_of(text: &[u8]) -> Result<Reply, String> {
         let mut reader = text;

@@ -1,17 +1,25 @@
 [package]
 name = "seleniumbase-rs-plugin-shield"
-description = "A seleniumbase-rs plugin that turns off browser telemetry, WebRTC address leaks and third-party cookies"
+description = "A seleniumbase-rs privacy plugin that blocks telemetry, WebRTC leaks, and third-party cookies, with optional Tor SOCKS5 circuit isolation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-keywords = ["seleniumbase-rs", "plugin", "privacy", "chromium"]
+keywords = ["seleniumbase-rs", "plugin", "privacy", "chromium", "tor"]
+
+[features]
+default = ["tor"]
+tor = ["dep:ring", "dep:tokio"]
 
 [dependencies]
 seleniumbase-rs-plugin.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ring = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 seleniumbase-rs-plugin-testing.workspace = true
+tempfile = "3.27"
+tokio = { workspace = true, features = ["test-util"] }

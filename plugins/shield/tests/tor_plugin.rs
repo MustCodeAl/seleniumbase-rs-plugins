@@ -1,7 +1,8 @@
+#![cfg(feature = "tor")]
 //! The plugin's hooks, driven through a `PluginSet` (so the set's capability
 //! and seal checks apply) against a fake Tor SocksPort.
 
-mod support;
+mod tor_support;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,14 +13,14 @@ use seleniumbase_rs_plugin::{
     Metadata, PathScope, Plugin, PluginError, PluginSet, Requirements, Result, Seals, WebRtcPolicy,
     async_trait,
 };
+use seleniumbase_rs_plugin_shield::tor::{ControlAuth, Isolation, Tor, TorConfig};
 use seleniumbase_rs_plugin_testing::RecordingBrowser;
-use seleniumbase_rs_plugin_tor::{ControlAuth, Isolation, Tor, TorConfig};
 use serde_json::json;
-use support::{
-    Answer, FakeSocksUpstream, dead_address, open, read_n, request_name, run, run_paused,
-};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tor_support::{
+    Answer, FakeSocksUpstream, dead_address, open, read_n, request_name, run, run_paused,
+};
 
 const NO_LOCAL_DNS: &str = "MAP * ^NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost";
 

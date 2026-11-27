@@ -3,6 +3,16 @@
 All notable changes to the crates in this repository. The crates share one
 version across all published plugins and plugin crates.
 
+## [Unreleased]
+
+### Changed
+
+- **`seleniumbase-rs-plugin` (`wasm` feature)**: moved the sandboxed `wasmi` WebAssembly plugin host out of `plugins/wasm` into an opt-in feature (`features = ["wasm"]`, `seleniumbase_rs_plugin::wasm`) of the plugin framework crate itself.
+- **`seleniumbase-rs-plugin-shield` (`tor` feature)**: folded Tor SOCKS5 routing and per-context circuit isolation from `plugins/tor` directly into `shield` behind `default = ["tor"]` (`shield.tor = true` or `[plugins.shield.tor]`), making `shield` the single privacy-hardening plugin.
+- **`seleniumbase-rs-plugin-crx`**: unified all Chromium extension loading (`.crx`, `.zip`, and unpacked Manifest V3 folders plus optional `wait_for_workers` / `worker_timeout_secs`) into `crx` with zero conflict against `browser`.
+- **`seleniumbase-rs-plugin-browser`**: reworked into containerized persistent browser sessions (Format v2 persisting cookies, `localStorage`/`sessionStorage`, open tabs, and regional identity with `ttl_secs`, 40+ built-in country geolocation presets, `sticky`/`round-robin`/`per-context` proxy IP auto-rotation, interactive login capture, and dynamic SPA flow execution via `sbrs plugin run browser`).
+- **`seleniumbase-rs-plugins-builtin`**: trimmed built-ins to seven plugins (`shield`, `crx`, `browser`, `fetcher`, `extractor`, `batcher`, `crawler`), moving `imap` and `block-resources` to standalone community plugins while keeping their crates in `plugins/imap` and `plugins/block-resources`.
+
 ## [0.10.0] - 2026-11-26
 
 ### Changed

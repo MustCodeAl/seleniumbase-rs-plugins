@@ -30,7 +30,7 @@ struct Wanted<'a> {
 
 /// The error of the option, with `what` as the reason.
 fn refuse(what: impl std::fmt::Display) -> PluginError {
-    PluginError::other(format!("browser: `wait_for_workers`: {what}"))
+    PluginError::other(format!("crx: `wait_for_workers`: {what}"))
 }
 
 /// Waits until each of `workers` has a running service worker, for at most

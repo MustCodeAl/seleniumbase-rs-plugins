@@ -6,12 +6,12 @@
 //! into plain data; a value it cannot vouch for is an error, never a panic and
 //! never silently dropped.
 
-use seleniumbase_rs_plugin::Package;
+use crate::Package;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::WasmError;
+use super::WasmError;
 
 /// The ABI version this host speaks: what `sbrs_abi_version` must return.
 pub const ABI_VERSION: i32 = 1;

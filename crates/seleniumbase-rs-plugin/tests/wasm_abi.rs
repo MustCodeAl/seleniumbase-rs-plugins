@@ -1,16 +1,17 @@
+#![cfg(feature = "wasm")]
 //! The plugin host against WebAssembly modules written in WAT: the happy
 //! paths, and every way a module can be wrong, hostile or runaway.
 
-mod common;
+mod wasm_common;
 
-use common::Module;
+use seleniumbase_rs_plugin::wasm::{Limits, WasmError, WasmPlugin};
 use seleniumbase_rs_plugin::{
     BrowserFamily, Engine, LaunchContext, LaunchSettings, Package, Plugin, PluginError, PluginSet,
     Requirements,
 };
 use seleniumbase_rs_plugin_testing::{Call, RecordingBrowser, RecordingPage, block_on};
-use seleniumbase_rs_plugin_wasm::{Limits, WasmError, WasmPlugin};
 use serde_json::json;
+use wasm_common::Module;
 
 fn load(module: &Module) -> Result<WasmPlugin, WasmError> {
     WasmPlugin::from_bytes(&module.build())

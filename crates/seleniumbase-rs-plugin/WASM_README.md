@@ -1,4 +1,4 @@
-# seleniumbase-rs-plugin-wasm
+# seleniumbase-rs-plugin
 
 Run [seleniumbase-rs](https://github.com/MustCodeAl/seleniumbase-rs) plugins that
 are written in **any language that compiles to WebAssembly** (Rust, C, Zig, Go,
@@ -13,14 +13,14 @@ clock or randomness, and it cannot call back into the host. Only pure functions
 cross the boundary.
 
 ```sh
-cargo add seleniumbase-rs-plugin-wasm --git https://github.com/MustCodeAl/seleniumbase-rs-plugins
+cargo add seleniumbase-rs-plugin --git https://github.com/MustCodeAl/seleniumbase-rs-plugins
 ```
 
 ## Use it
 
 ```rust,no_run
 use seleniumbase_rs_plugin::PluginSet;
-use seleniumbase_rs_plugin_wasm::WasmPlugin;
+use seleniumbase_rs_plugin::wasm::WasmPlugin;
 
 let plugins = PluginSet::new().with(WasmPlugin::from_file("hello.wasm")?)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -242,7 +242,7 @@ Load it, then run the plugin against the recording fakes of
 ```rust,ignore
 use seleniumbase_rs_plugin::PluginSet;
 use seleniumbase_rs_plugin_testing::{RecordingPage, block_on};
-use seleniumbase_rs_plugin_wasm::WasmPlugin;
+use seleniumbase_rs_plugin::wasm::WasmPlugin;
 
 let set = PluginSet::new().with(WasmPlugin::from_file("hello.wasm")?)?;
 let page = RecordingPage::new();

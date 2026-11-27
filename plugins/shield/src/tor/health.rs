@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use tokio::net::TcpStream;
 
-use crate::config::TorConfig;
-use crate::{control, socks};
+use super::config::TorConfig;
+use super::{control, socks};
 
 /// The message when nothing listens on the SocksPort.
 #[must_use]

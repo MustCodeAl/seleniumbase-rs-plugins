@@ -3,7 +3,7 @@
 //! The module is compiled and instantiated with no imports, so it cannot reach
 //! anything outside its own memory. Every call is metered with fuel, the memory
 //! has a hard cap, and what a function returns is copied out of the memory as
-//! bytes, never trusted: [`crate::abi`] checks it afterwards. When
+//! bytes, never trusted: [`super::abi`] checks it afterwards. When
 //! [`read_exports`] returns, the store, the instance and the module are gone.
 
 use wasmi::{
@@ -11,11 +11,11 @@ use wasmi::{
     Module, Store, StoreLimits, StoreLimitsBuilder, TrapCode, WasmResults,
 };
 
-use crate::abi::{
+use super::abi::{
     ABI_VERSION, EXPORT_BLOCKED_URLS, EXPORT_LAUNCH_ARGS, EXPORT_MEMORY, EXPORT_NAME,
     EXPORT_SCRIPTS, EXPORT_VERSION, KNOWN_FUNCTIONS, RESERVED_PREFIX, Raw, unpack,
 };
-use crate::{Limits, WasmError};
+use super::{Limits, WasmError};
 
 /// How a failure in the start function is named.
 const START: &str = "(start function)";

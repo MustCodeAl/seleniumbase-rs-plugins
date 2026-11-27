@@ -8,12 +8,12 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::unpack;
 use seleniumbase_rs_plugin::{PluginError, Result};
-use seleniumbase_rs_plugin_crx::unpack;
 use serde_json::Value;
 use tempfile::TempDir;
 
-use crate::config::SessionConfig;
+use crate::config::CrxConfig;
 
 /// Archives larger than this are refused before they are read. It is the limit
 /// the `crx` plugin puts on the size of what an archive unpacks to.
@@ -45,7 +45,7 @@ pub(crate) struct Prepared {
 
 /// The error for the path `given` of the option `option`.
 fn problem(option: &str, given: &Path, what: impl Display) -> PluginError {
-    PluginError::other(format!("browser: {option} `{}`: {what}", given.display()))
+    PluginError::other(format!("crx: {option} `{}`: {what}", given.display()))
 }
 
 /// The real path of `given`, which must exist.
@@ -63,12 +63,16 @@ fn resolve(option: &str, given: &Path) -> Result<PathBuf> {
 /// # Errors
 ///
 /// [`PluginError::Other`], naming the option and the path as the user wrote it.
-pub(crate) fn prepare(config: &SessionConfig, temp_root: &Path) -> Result<Prepared> {
+pub(crate) fn prepare(config: &CrxConfig, temp_root: &Path) -> Result<Prepared> {
     let mut prepared = Prepared::default();
     let mut seen = HashSet::new();
 
-    for given in &config.extension_zip {
-        let option = "extension_zip";
+    for given in config.archives() {
+        let option = if config.files.contains(given) {
+            "files"
+        } else {
+            "extension_zip"
+        };
         let real = resolve(option, given)?;
         let metadata = fs::metadata(&real)
             .map_err(|error| problem(option, given, format!("cannot be read: {error}")))?;
@@ -91,12 +95,12 @@ pub(crate) fn prepare(config: &SessionConfig, temp_root: &Path) -> Result<Prepar
         let bytes = fs::read(&real)
             .map_err(|error| problem(option, given, format!("cannot be read: {error}")))?;
         let temp = tempfile::Builder::new()
-            .prefix("sbrs-browser-")
+            .prefix("sbrs-crx-")
             .tempdir_in(temp_root)
             .map_err(|error| problem(option, given, format!("cannot be unpacked: {error}")))?;
         unpack_archive(&bytes, temp.path()).map_err(|what| problem(option, given, what))?;
-        let has_worker =
-            check_manifest(temp.path()).map_err(|what| problem(option, given, what))?;
+        let has_worker = check_manifest(temp.path(), config.require_manifest_v3)
+            .map_err(|what| problem(option, given, what))?;
         let folder = fs::canonicalize(temp.path())
             .map_err(|error| problem(option, given, format!("cannot be unpacked: {error}")))?;
         if has_worker {
@@ -124,7 +128,8 @@ pub(crate) fn prepare(config: &SessionConfig, temp_root: &Path) -> Result<Prepar
         if !seen.insert(real.clone()) {
             continue;
         }
-        let has_worker = check_manifest(&real).map_err(|what| problem(option, given, what))?;
+        let has_worker = check_manifest(&real, config.require_manifest_v3)
+            .map_err(|what| problem(option, given, what))?;
         if has_worker {
             prepared.workers.push(Worker {
                 folder: real.clone(),
@@ -158,8 +163,9 @@ fn unpack_archive(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> 
     Err("is neither a CRX nor a ZIP file".to_owned())
 }
 
-/// Checks that `folder` holds a Manifest V3 `manifest.json`.
-fn check_manifest(folder: &Path) -> std::result::Result<bool, String> {
+/// Checks that `folder` holds a valid `manifest.json` (and enforces Manifest V3
+/// when `require_mv3` is true).
+fn check_manifest(folder: &Path, require_mv3: bool) -> std::result::Result<bool, String> {
     let path = folder.join("manifest.json");
     let metadata = fs::metadata(&path)
         .ok()
@@ -170,13 +176,15 @@ fn check_manifest(folder: &Path) -> std::result::Result<bool, String> {
     }
     let bytes =
         fs::read(&path).map_err(|error| format!("manifest.json cannot be read: {error}"))?;
-    // Chrome accepts a byte order mark; some editors add one.
     let text = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
     let manifest: Value = serde_json::from_slice(text)
         .map_err(|error| format!("manifest.json is not valid JSON: {error}"))?;
     let Some(object) = manifest.as_object() else {
         return Err("manifest.json is not a JSON object".to_owned());
     };
+    if !require_mv3 {
+        return Ok(names_a_service_worker(object));
+    }
     match object.get("manifest_version") {
         None => Err(
             "manifest.json has no manifest_version; only Manifest V3 extensions are loaded"
@@ -231,7 +239,7 @@ mod tests {
         let bad = fixtures.path().join("bad.zip");
         fs::write(&bad, b"PK\x03\x04 cut short").expect("write");
 
-        let config = SessionConfig::builder()
+        let config = CrxConfig::builder()
             .zip(&good)
             .zip(&bad)
             .build()
@@ -253,7 +261,7 @@ mod tests {
         fs::write(&zip, zip_with(&[("manifest.json", MANIFEST)])).expect("write");
 
         let prepared = prepare(
-            &SessionConfig::builder()
+            &CrxConfig::builder()
                 .zip(&zip)
                 .build()
                 .expect("valid options"),
@@ -274,7 +282,7 @@ mod tests {
         let zip = fixtures.path().join("empty.zip");
         fs::write(&zip, zip_with(&[])).expect("write");
         let error = prepare(
-            &SessionConfig::builder()
+            &CrxConfig::builder()
                 .zip(&zip)
                 .build()
                 .expect("valid options"),

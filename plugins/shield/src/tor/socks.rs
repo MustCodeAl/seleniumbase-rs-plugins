@@ -268,7 +268,7 @@ pub(crate) async fn probe<S: AsyncRead + AsyncWrite + Unpin>(stream: &mut S) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::run;
+    use crate::tor::run;
 
     fn name(text: &str, port: u16) -> Target {
         Target {

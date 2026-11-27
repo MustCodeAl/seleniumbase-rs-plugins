@@ -1,238 +1,335 @@
-//! Loads browser extensions into the Chromium browser seleniumbase-rs starts,
-//! from `.zip` and `.crx` files and from unpacked folders.
+//! Containerized persistent browser sessions for `seleniumbase-rs`.
 //!
-//! The two extension options are the ones Python SeleniumBase has, with the same
-//! meaning: `extension_zip` is `--extension-zip` (`.zip` or `.crx` files) and
-//! `extension_dir` is `--extension-dir` (unpacked folders). Archives are
-//! unpacked, with the `crx` plugin's code, into a temporary folder that belongs
-//! to one browser and is deleted when it closes; unpacked folders are loaded
-//! where they are and are never touched. Every extension must be Manifest V3,
-//! and a path that does not exist fails the launch before the browser starts,
-//! with the path in the message.
+//! Keep cookies, `localStorage`, `sessionStorage`, authentication state, open
+//! tabs, and regional identity alive across calls and runs without reconnecting
+//! or repeating logins. Pair with built-in geolocation targeting, proxy/IP
+//! auto-rotation across isolated contexts, session TTL expiry, interactive
+//! manual sign-in capture, and dynamic SPA flow/extraction tasks.
+//!
+//! Browser extension loading (`.crx`, `.zip`, unpacked Manifest V3 folders) is
+//! handled exclusively by `seleniumbase-rs-plugin-crx` (`--plugin crx`). Both
+//! plugins compose cleanly in the same [`PluginSet`](seleniumbase_rs_plugin::PluginSet).
 //!
 //! ```
 //! use seleniumbase_rs_plugin::PluginSet;
-//! use seleniumbase_rs_plugin_browser::{BrowserSession, SessionConfig};
+//! use seleniumbase_rs_plugin_browser::BrowserSession;
 //!
-//! let config = SessionConfig::builder()
-//!     .zip("extensions/dark-reader.crx")
-//!     .dir("my-extension")
-//!     .build()?;
-//! let plugins = PluginSet::strict().with(BrowserSession::new(config)?)?;
+//! // One-line containerized persistent session
+//! let plugin = BrowserSession::container("checkout-account")?;
+//! let plugins = PluginSet::strict().with(plugin)?;
 //! assert_eq!(plugins.names(), ["browser"]);
 //! # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
 //! ```
-//!
-//! In a config file:
-//!
-//! ```toml
-//! [plugins.browser]
-//! extension_zip = ["extensions/dark-reader.crx"]
-//! extension_dir = ["my-extension"]
-//! ```
-//!
-//! # What the plugin hands to the host
-//!
-//! The plugin adds the folders to [`LaunchSettings::extensions`]; it adds no
-//! switch. The host joins them into Chrome's `--load-extension` list (or loads
-//! them over the protocol, where branded Chrome ignores the switch), which is
-//! why a folder path may not hold a comma. Python does not add
-//! `--disable-extensions-except` either.
-//!
-//! # Headless
-//!
-//! Chrome's old headless mode cannot load extensions and its new one can;
-//! Python loads the extensions the user names whatever the mode, and so does
-//! this plugin. The one thing it refuses is an explicit `--headless=old`
-//! switch, which could only lose the extensions without a word.
-//!
-//! # Waiting for workers, saved sessions, signing in
-//!
-//! Three more groups of options use the newer parts of the plugin API. A
-//! combination that makes no sense is an error that names the option, before
-//! any browser starts; an option the host cannot serve fails the launch and
-//! names it too. Nothing is accepted and then ignored.
-//!
-//! - `wait_for_workers` (with `worker_timeout_secs`, 10 s unless told otherwise)
-//!   makes `on_browser` wait until each extension of this plugin that has a
-//!   `background.service_worker` has a running worker. It is off by default and
-//!   needs a host that implements `BrowserHandle::extension_workers`.
-//! - `session` names a saved session: the cookies of the default browser
-//!   context, kept in `<session_dir>/<session>.json` (`saved_sessions` in the
-//!   working directory unless `session_dir` says otherwise). They are put back
-//!   at launch, and with `save_on_close` written just before the browser
-//!   closes, through a file only its owner can read. localStorage is not kept.
-//!   `save_on_close` needs a host that runs `before_close`, which only the pure
-//!   CDP engine does (and only through `Browser::close`: a browser that is
-//!   dropped runs `on_close` alone); on the WebDriver host `on_browser` fails
-//!   naming the option, before anything is restored.
-//! - `interactive` (with `pause_message`) offers the task
-//!   `sbrs plugin run browser`: it opens a tab, waits for a person to sign in
-//!   by hand in the headed browser, and saves the session.
-//!
-//! The cookie file holds credentials: no error, log line or `Debug` output
-//! carries a value of it. Nothing here has run in a real Chrome.
 
 mod config;
+mod flow;
+pub mod geo;
 mod interactive;
 mod session;
 
-mod source;
-mod workers;
-
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
 
+use seleniumbase_rs_plugin::config::options;
 use seleniumbase_rs_plugin::{
-    BrowserHandle, Budgets, Capability, Category, Configurable, Engine, LaunchSettings, Metadata,
-    PathScope, Plugin, PluginError, Requirements, Result, Task, TaskContext, async_trait,
-    config::options,
+    BrowserHandle, Capability, Category, Configurable, ContextSettings, Engine, HostScope,
+    LaunchSettings, Metadata, NavOutcome, PageHandle, PathScope, Plugin, PluginError, Requirements,
+    Result, Task, TaskContext, async_trait,
 };
 use serde_json::{Value, json};
-use tempfile::TempDir;
 
-pub use config::{SessionConfig, SessionConfigBuilder};
+pub use config::{RotationMode, SessionConfig, SessionConfigBuilder};
+pub use geo::GeoProfile;
+pub use session::{ContainerIdentity, OriginStorage, SaveSummary};
 
-/// The name the plugin is enabled by.
 const NAME: &str = "browser";
 
-/// Loads extensions from `.zip` and `.crx` files and unpacked folders. See the
-/// [crate documentation](crate).
+/// Live state tracked for one running browser instance.
+#[derive(Debug, Default)]
+struct LiveState {
+    /// Cached storage hydration init script from the loaded container.
+    storage_init_script: Option<String>,
+    /// Per-origin `localStorage` and `sessionStorage` captured during this run.
+    storage: BTreeMap<String, OriginStorage>,
+    /// Open `http://`/`https://` tab URLs observed during this run.
+    tabs: Vec<String>,
+    /// Resolved container identity (loaded + config overrides).
+    identity: ContainerIdentity,
+}
+
+/// Containerized persistent browser sessions plugin. See the [crate docs](crate).
 #[derive(Debug)]
 pub struct BrowserSession {
     config: SessionConfig,
-    /// Where the saved session lives, when `session` is set.
     store: Option<session::Store>,
-    /// The folders this browser's archives were unpacked into.
-    unpacked: Mutex<Vec<TempDir>>,
-    /// The extensions this browser loads that have a service worker.
-    workers: Mutex<Vec<source::Worker>>,
+    proxy_cursor: Arc<AtomicUsize>,
+    live: Mutex<LiveState>,
 }
 
 impl BrowserSession {
-    /// Builds the plugin from `config`.
-    ///
-    /// The paths are not looked at yet: a path that does not exist fails the
-    /// launch, in [`Plugin::before_launch`].
+    /// One-line constructor for a named persistent container (`save_on_close = true`,
+    /// `restore_tabs = true`).
     ///
     /// # Errors
     ///
-    /// [`PluginError::Config`] for an empty entry, for a folder whose path holds
-    /// a comma, and for options that make no sense together (`wait_for_workers`
-    /// without an extension, `save_on_close` without `session`, a bad session
-    /// name, a number out of range, ...); the message names the option. Also
-    /// when `session_dir` is relative and the working directory is unknown.
-    /// Nothing is read or written yet.
-    pub fn new(config: SessionConfig) -> Result<Self> {
-        config.check()?;
-        let store = session::Store::from_config(&config)?;
-        Ok(Self::build(config, store))
+    /// [`PluginError::Config`] when `name` is invalid or persistence is unavailable.
+    pub fn container(name: impl Into<String>) -> Result<Self> {
+        let config = SessionConfig::builder()
+            .session(name)
+            .save_on_close(true)
+            .restore_tabs(true)
+            .build()?;
+        Self::new(config)
     }
 
-    /// A plugin for options that were already checked.
-    fn build(config: SessionConfig, store: Option<session::Store>) -> Self {
+    /// One-line constructor for a geo-targeted persistent container.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Config`] when `name` or `country` is invalid.
+    pub fn for_country(name: impl Into<String>, country: impl Into<String>) -> Result<Self> {
+        let config = SessionConfig::builder()
+            .session(name)
+            .country(country)
+            .save_on_close(true)
+            .restore_tabs(true)
+            .build()?;
+        Self::new(config)
+    }
+
+    /// Builds the plugin from a validated [`SessionConfig`].
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Config`] when any option in `config` is invalid.
+    pub fn new(mut config: SessionConfig) -> Result<Self> {
+        config.normalize_and_check()?;
+        let store = session::Store::from_config(&config)?;
+        Ok(Self::checked(config, store, Arc::new(AtomicUsize::new(0))))
+    }
+
+    fn checked(
+        config: SessionConfig,
+        store: Option<session::Store>,
+        proxy_cursor: Arc<AtomicUsize>,
+    ) -> Self {
         Self {
             config,
             store,
-            unpacked: Mutex::new(Vec::new()),
-            workers: Mutex::new(Vec::new()),
+            proxy_cursor,
+            live: Mutex::new(LiveState::default()),
         }
     }
 
-    /// The options the plugin was built with.
+    /// Returns the configuration this plugin was built with.
     #[must_use]
     pub fn config(&self) -> &SessionConfig {
         &self.config
     }
 
-    fn unpacked(&self) -> MutexGuard<'_, Vec<TempDir>> {
-        self.unpacked.lock().unwrap_or_else(PoisonError::into_inner)
+    fn live(&self) -> MutexGuard<'_, LiveState> {
+        self.live.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn workers(&self) -> MutexGuard<'_, Vec<source::Worker>> {
-        self.workers.lock().unwrap_or_else(PoisonError::into_inner)
+    fn build_identity(&self, loaded: Option<&ContainerIdentity>) -> ContainerIdentity {
+        let base = loaded.cloned().unwrap_or_default();
+        ContainerIdentity {
+            country: self.config.country.clone().or(base.country),
+            locale: self
+                .config
+                .effective_locale()
+                .map(str::to_owned)
+                .or(base.locale),
+            timezone: self
+                .config
+                .effective_timezone()
+                .map(str::to_owned)
+                .or(base.timezone),
+            geolocation: self
+                .config
+                .effective_geolocation()
+                .map(|(lat, lon)| [lat, lon])
+                .or(base.geolocation),
+            user_agent: self.config.user_agent.clone().or(base.user_agent),
+            proxy_index: base.proxy_index,
+        }
+    }
+
+    fn next_proxy(&self, for_context: bool) -> Option<(usize, String)> {
+        if self.config.proxies.is_empty() {
+            return None;
+        }
+        let len = self.config.proxies.len();
+        let idx = match self.config.rotation {
+            RotationMode::Sticky => {
+                if for_context {
+                    return None;
+                }
+                self.live().identity.proxy_index.unwrap_or(0) % len
+            }
+            RotationMode::RoundRobin => self.proxy_cursor.fetch_add(1, Ordering::Relaxed) % len,
+            RotationMode::PerContext => {
+                if for_context {
+                    self.proxy_cursor.fetch_add(1, Ordering::Relaxed) % len
+                } else {
+                    0
+                }
+            }
+        };
+        Some((idx, self.config.proxies[idx].clone()))
+    }
+
+    async fn save_container(&self, browser: &dyn BrowserHandle) -> Result<SaveSummary> {
+        let Some(ref store) = self.store else {
+            return Err(PluginError::other(
+                "browser: saving a container requires `session`",
+            ));
+        };
+        let cookies = session::capture_cookies(browser).await?;
+        let now_ms = session::unix_millis();
+        let expires_at_ms = self
+            .config
+            .ttl_secs
+            .map(|ttl| now_ms.saturating_add(ttl.saturating_mul(1_000)));
+        let (storage, tabs, identity) = {
+            let live = self.live();
+            (
+                live.storage.clone(),
+                live.tabs.clone(),
+                live.identity.clone(),
+            )
+        };
+        let summary = SaveSummary {
+            session: store.name().to_owned(),
+            cookies: cookies.len(),
+            storage_origins: storage.len(),
+            tabs: tabs.len(),
+        };
+        let snapshot = session::ContainerSnapshot {
+            saved_at_ms: now_ms,
+            expires_at_ms,
+            cookies,
+            storage,
+            tabs,
+            identity,
+        };
+        store.write(&snapshot)?;
+        Ok(summary)
+    }
+
+    fn record_tab(&self, url: &str) {
+        if !session::is_http_url(url) {
+            return;
+        }
+        let mut live = self.live();
+        if !live.tabs.iter().any(|existing| existing == url) && live.tabs.len() < 32 {
+            live.tabs.push(url.to_owned());
+        }
+    }
+
+    fn record_storage(&self, origin: String, storage: OriginStorage) {
+        if storage.local_storage.is_empty() && storage.session_storage.is_empty() {
+            return;
+        }
+        let mut live = self.live();
+        live.storage.insert(origin, storage);
     }
 }
 
-/// What every instance declares, whatever its options.
 fn declared() -> Metadata {
-    Metadata::new(Category::Extension)
+    Metadata::new(Category::Environment)
         .version(env!("CARGO_PKG_VERSION"))
-        .summary("Loads extensions from .zip and .crx files and unpacked folders into the browser it starts")
-        .capability(Capability::LaunchExtensions)
-        .conflicts_with("crx")
-}
-
-/// The time limits of an instance that waits `seconds` for the workers: the
-/// set's 10 s for `on_browser` would end a longer wait with a bare time-out,
-/// so the hook gets the wait and some headroom.
-fn wait_budgets(seconds: u64) -> Budgets {
-    let mut budgets = Budgets::default();
-    budgets.other = Some(Duration::from_secs(seconds) + workers::HOOK_HEADROOM);
-    budgets
+        .summary(
+            "Containerized persistent browser sessions: cookies, Web Storage, open tabs, \
+             identity, TTL expiry, geolocation targeting, IP rotation, and dynamic SPA flows",
+        )
+        .optional(Capability::LaunchArgs)
+        .optional(Capability::LaunchProxy)
+        .optional(Capability::Contexts)
+        .optional(Capability::CookiesRead)
+        .optional(Capability::CookiesWrite)
+        .optional(Capability::PageScript(HostScope::Everywhere))
+        .optional(Capability::PageEvaluate)
+        .optional(Capability::PageNavigate)
+        .optional(Capability::Cdp("Emulation".into()))
+        .optional(Capability::Cdp("Network".into()))
+        .optional(Capability::Clock)
+        .optional(Capability::Task)
 }
 
 impl Configurable for BrowserSession {
     const NAME: &'static str = NAME;
 
     fn describe() -> Metadata {
-        // What an instance may add, depending on its options: cookies for the
-        // session, the clock for waiting, a task and a tab for signing in.
         declared()
-            .capability(Capability::HostFsWrite(PathScope::Temp))
-            .optional(Capability::CookiesRead)
-            .optional(Capability::CookiesWrite)
-            .optional(Capability::Clock)
-            .optional(Capability::Task)
-            .optional(Capability::PageNavigate)
     }
 
-    /// Options: `extension_zip` and `extension_dir` (each a list of paths or a
-    /// comma-separated text), and `wait_for_workers`, `worker_timeout_secs`,
-    /// `session`, `save_on_close`, `session_dir`, `interactive` and
-    /// `pause_message`; see [`SessionConfig`].
-    /// The files are looked at at launch, not here.
-    fn configure(value: &serde_json::Value) -> Result<Self> {
-        Self::new(options::<SessionConfig>(NAME, value)?)
+    fn configure(value: &Value) -> Result<Self> {
+        let config = if value.is_null() {
+            SessionConfig::new()
+        } else {
+            options::<SessionConfig>(NAME, value)?
+        };
+        Self::new(config)
     }
 }
 
-/// The `interactive` task, started by `sbrs plugin run browser`: a person signs
-/// in by hand, in the headed browser, and the cookies are kept as the session.
 #[async_trait]
 impl Task for BrowserSession {
     async fn run(&self, cx: &TaskContext<'_>) -> Result<Value> {
-        let Some(store) = &self.store else {
-            // `interactive` without `session` does not pass the check.
-            return Err(PluginError::other("browser: `interactive` needs `session`"));
-        };
-        let url = interactive::start_url(cx.input)?;
-        // A folder that cannot be written is found out now, not after a person
-        // has signed in.
-        store.check_writable()?;
         let browser = cx.plugins.guarded_browser(NAME, cx.browser)?;
-        let page = browser.new_page(url).await?;
-        cx.prompt
-            .wait(self.config.pause_message_or_default(), &*page)
-            .await
-            .map_err(|error| {
-                PluginError::other(format!(
-                    "browser: `interactive` needs a person at the keyboard: {error}"
-                ))
-            })?;
-        // The tab stays open: closing the last tab of a headed Chrome can end
-        // the browser, and the host closes it right after the task.
-        let cookies = session::save(&browser, store).await?;
-        let summary = json!({ "session": store.name(), "cookies": cookies });
-        cx.sink.record(&summary)?;
-        Ok(summary)
-    }
-}
+        if self.config.interactive {
+            let Some(ref store) = self.store else {
+                return Err(PluginError::other(
+                    "browser: `interactive` requires `session`",
+                ));
+            };
+            let url = interactive::start_url(cx.input)?;
+            store.check_writable()?;
+            let page = browser.new_page(url).await?;
+            cx.prompt
+                .wait(self.config.pause_message_or_default(), &*page)
+                .await
+                .map_err(|error| {
+                    PluginError::other(format!(
+                        "browser: `interactive` needs a person at the keyboard: {error}"
+                    ))
+                })?;
+            if let Ok(current) = page.url().await {
+                self.record_tab(&current);
+            }
+            if let Ok(Some((origin, st))) = flow::snapshot_page_storage(&*page).await {
+                self.record_storage(origin, st);
+            }
+            let summary = self.save_container(&browser).await?;
+            let out = serde_json::to_value(&summary)
+                .map_err(|e| PluginError::other(format!("browser: {e}")))?;
+            cx.sink.record(&out)?;
+            return Ok(out);
+        }
 
-/// Whether `args` ask for Chrome's old headless mode.
-fn asks_for_old_headless(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| arg.trim_start_matches('-') == "headless=old")
+        let (extracted, visited_urls, captured_storage, save_flag) =
+            flow::execute(&browser, cx.input).await?;
+        for url in visited_urls {
+            self.record_tab(&url);
+        }
+        for (origin, st) in captured_storage {
+            self.record_storage(origin, st);
+        }
+        let saved = if (save_flag || self.config.save_on_close) && self.store.is_some() {
+            Some(self.save_container(&browser).await?)
+        } else {
+            None
+        };
+        let out = json!({
+            "session": self.config.session,
+            "extracted": extracted,
+            "saved": saved,
+        });
+        cx.sink.record(&out)?;
+        Ok(out)
+    }
 }
 
 #[async_trait]
@@ -242,29 +339,48 @@ impl Plugin for BrowserSession {
     }
 
     fn requirements(&self) -> Requirements {
-        let needs = Requirements::CHROMIUM_ONLY | Requirements::LAUNCH_ONLY;
-        // A person signs in, so there must be a window for them.
+        let mut needs = Requirements::CHROMIUM_ONLY;
         if self.config.interactive {
-            needs | Requirements::HEADFUL
-        } else {
-            needs
+            needs = needs | Requirements::HEADFUL;
         }
+        needs
     }
 
-    /// The capabilities this instance needs: the declared ones, cookie access
-    /// and the session file for a session, the clock (and a longer limit for
-    /// `on_browser`) for the wait, the task for `interactive`, the temporary
-    /// folder only when it has archives to unpack, and the paths it reads.
     fn metadata(&self) -> Metadata {
-        let mut meta = declared();
-        if !self.config.extension_zip.is_empty() {
-            meta = meta.capability(Capability::HostFsWrite(PathScope::Temp));
+        let mut meta = Metadata::new(Category::Environment)
+            .version(env!("CARGO_PKG_VERSION"))
+            .summary(
+                "Containerized persistent browser sessions: cookies, Web Storage, open tabs, \
+                 identity, TTL expiry, geolocation targeting, IP rotation, and dynamic SPA flows",
+            )
+            .capability(Capability::Task)
+            .capability(Capability::PageNavigate)
+            .capability(Capability::PageEvaluate)
+            .capability(Capability::PageScript(HostScope::Everywhere))
+            .capability(Capability::Clock);
+
+        if self.config.effective_locale().is_some()
+            || self.config.effective_timezone().is_some()
+            || self.config.effective_geolocation().is_some()
+        {
+            meta = meta
+                .capability(Capability::LaunchArgs)
+                .capability(Capability::Cdp("Emulation".into()));
         }
-        // The paths it reads: the extensions, and the session file.
-        let mut reads = self.config.sources();
-        if let Some(store) = &self.store {
-            reads.push(store.file().to_path_buf());
-            meta = meta.capability(Capability::CookiesWrite);
+        if self.config.user_agent.is_some() {
+            meta = meta.capability(Capability::Cdp("Network".into()));
+        }
+        if !self.config.proxies.is_empty() {
+            meta = meta
+                .capability(Capability::LaunchProxy)
+                .capability(Capability::Contexts);
+        }
+        if let Some(ref store) = self.store {
+            meta = meta
+                .capability(Capability::CookiesWrite)
+                .capability(Capability::HostFsRead(PathScope::Declared(vec![
+                    store.file().to_path_buf(),
+                ])));
             if self.config.saves() {
                 meta =
                     meta.capability(Capability::CookiesRead)
@@ -273,103 +389,139 @@ impl Plugin for BrowserSession {
                         ])));
             }
         }
-        if !reads.is_empty() {
-            meta = meta.capability(Capability::HostFsRead(PathScope::Declared(reads)));
-        }
-        if self.config.wait_for_workers {
-            meta = meta
-                .capability(Capability::Clock)
-                .budget(wait_budgets(self.config.worker_timeout_secs_or_default()));
-        }
-        if self.config.interactive {
-            // The task opens a tab, at an address when the input has one.
-            meta = meta
-                .capability(Capability::Task)
-                .optional(Capability::PageNavigate);
-        }
         meta
     }
 
-    /// The task that waits for a person to sign in, when `interactive` is on.
     fn task(&self) -> Option<&dyn Task> {
-        self.config.interactive.then_some(self as &dyn Task)
+        Some(self as &dyn Task)
     }
 
-    /// A fresh instance for each browser, so closing one pooled browser does
-    /// not delete the unpacked folders of the others.
     fn per_launch(&self) -> Option<Arc<dyn Plugin>> {
-        Some(Arc::new(Self::build(
+        Some(Arc::new(Self::checked(
             self.config.clone(),
             self.store.clone(),
+            Arc::clone(&self.proxy_cursor),
         )))
     }
 
     async fn before_launch(&self, launch: &mut LaunchSettings) -> Result<()> {
-        if self.config.is_empty() {
-            return Ok(());
+        let loaded = match &self.store {
+            Some(store) => store.load(self.config.ttl_secs)?,
+            None => None,
+        };
+        let mut identity = self.build_identity(loaded.as_ref().map(|s| &s.identity));
+
+        if let Some(ref locale) = identity.locale {
+            let arg = format!("--lang={locale}");
+            if !launch.args.contains(&arg) {
+                launch.args.push(arg);
+            }
         }
-        if asks_for_old_headless(&launch.args) {
-            return Err(PluginError::other(
-                "browser: extensions cannot be loaded in Chrome's old headless mode (--headless=old); use the new headless mode, which supports them",
-            ));
+
+        if launch.proxy.is_none()
+            && let Some((idx, proxy_url)) = self.next_proxy(false)
+        {
+            launch.proxy = Some(proxy_url);
+            identity.proxy_index = Some(idx);
         }
-        let prepared = source::prepare(&self.config, &std::env::temp_dir())?;
-        launch.extensions.extend(prepared.folders);
-        self.unpacked().extend(prepared.temps);
-        self.workers().extend(prepared.workers);
+
+        let mut live = self.live();
+        live.identity = identity;
+        if let Some(snapshot) = loaded {
+            live.storage_init_script = snapshot.storage_init_script();
+            live.storage = snapshot.storage;
+            live.tabs = snapshot.tabs;
+        }
         Ok(())
     }
 
-    /// Waits for the extensions' service workers when `wait_for_workers` is
-    /// on, then puts the saved session back (`session`) and, when it will be
-    /// saved, checks that its folder can be written.
-    ///
-    /// Fails first, naming `save_on_close`, when it is on and the engine does
-    /// not run `before_close` (the WebDriver host does not): the session would
-    /// be restored and never saved.
+    async fn before_context(&self, settings: &mut ContextSettings) -> Result<()> {
+        if settings.proxy.is_none()
+            && let Some((_, proxy_url)) = self.next_proxy(true)
+        {
+            settings.proxy = Some(proxy_url);
+        }
+        Ok(())
+    }
+
     async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
-        // Only the pure CDP engine runs `before_close`. Elsewhere the session
-        // would be restored and then never saved, so refuse before anything
-        // is read or written.
         if self.config.save_on_close && browser.engine() != Engine::Cdp {
             return Err(PluginError::other(
-                "browser: `save_on_close`: needs a host that runs `before_close` when the browser closes; the WebDriver host does not yet, so the cookies would never be saved. Use the pure CDP engine, or turn `save_on_close` off",
+                "browser: `save_on_close` requires the pure CDP engine (`before_close` hook)",
             ));
         }
-
-        if self.config.wait_for_workers {
-            let workers = self.workers().clone();
-            workers::wait(
-                browser,
-                &workers,
-                self.config.worker_timeout_secs_or_default(),
-            )
-            .await?;
-        }
-        if let Some(store) = &self.store {
-            session::restore(browser, store).await?;
-            if self.config.saves() {
-                store.check_writable()?;
+        let Some(ref store) = self.store else {
+            return Ok(());
+        };
+        if let Some(snapshot) = store.load(self.config.ttl_secs)? {
+            let _ = session::restore_cookies(browser, &snapshot.cookies).await?;
+            let tabs_to_open = if self.config.restore_tabs {
+                snapshot.tabs.clone()
+            } else {
+                Vec::new()
+            };
+            {
+                let mut live = self.live();
+                live.storage_init_script = snapshot.storage_init_script();
+                live.storage = snapshot.storage;
+                live.tabs = snapshot.tabs;
+                live.identity = self.build_identity(Some(&snapshot.identity));
+            }
+            for url in tabs_to_open {
+                let _ = browser.new_page(Some(&url)).await;
             }
         }
         Ok(())
     }
 
-    /// Saves the session when `save_on_close` is on. The browser still
-    /// answers commands here.
-    async fn before_close(&self, browser: &dyn BrowserHandle) -> Result<()> {
-        if self.config.save_on_close
-            && let Some(store) = &self.store
-        {
-            session::save(browser, store).await?;
+    async fn on_page_created(&self, page: &dyn PageHandle) -> Result<()> {
+        let (script, identity) = {
+            let live = self.live();
+            (live.storage_init_script.clone(), live.identity.clone())
+        };
+        if let Some(src) = script {
+            page.add_init_script(&src).await?;
+        }
+        if page.engine() == Engine::Cdp {
+            if let Some(ref locale) = identity.locale {
+                let _ = page
+                    .send("Emulation.setLocaleOverride", json!({ "locale": locale }))
+                    .await;
+            }
+            if let Some(ref tz) = identity.timezone {
+                let _ = page
+                    .send("Emulation.setTimezoneOverride", json!({ "timezoneId": tz }))
+                    .await;
+            }
+            if let Some([lat, lon]) = identity.geolocation {
+                let _ = page
+                    .send(
+                        "Emulation.setGeolocationOverride",
+                        json!({ "latitude": lat, "longitude": lon, "accuracy": 100.0 }),
+                    )
+                    .await;
+            }
+            if let Some(ref ua) = identity.user_agent {
+                let _ = page
+                    .send("Network.setUserAgentOverride", json!({ "userAgent": ua }))
+                    .await;
+            }
         }
         Ok(())
     }
 
-    async fn on_close(&self) -> Result<()> {
-        // Dropping the folders deletes them. Folders the user named are not
-        // in this list.
-        self.unpacked().clear();
+    async fn after_navigate(&self, page: &dyn PageHandle, outcome: &NavOutcome) -> Result<()> {
+        self.record_tab(&outcome.url);
+        if let Ok(Some((origin, st))) = flow::snapshot_page_storage(page).await {
+            self.record_storage(origin, st);
+        }
+        Ok(())
+    }
+
+    async fn before_close(&self, browser: &dyn BrowserHandle) -> Result<()> {
+        if self.config.save_on_close && self.store.is_some() {
+            let _ = self.save_container(browser).await?;
+        }
         Ok(())
     }
 }

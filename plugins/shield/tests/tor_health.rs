@@ -1,17 +1,18 @@
+#![cfg(feature = "tor")]
 //! The start-up checks against a fake SocksPort and a fake control port.
 
-mod support;
+mod tor_support;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use seleniumbase_rs_plugin::PluginError;
-use seleniumbase_rs_plugin_tor::health::{check, check_with, no_listener_message};
-use seleniumbase_rs_plugin_tor::{ControlAuth, TorConfig};
-use support::control::{FakeControlPort, Script};
-use support::{Answer, FakeSocksUpstream, dead_address, run};
+use seleniumbase_rs_plugin_shield::tor::health::{check, check_with, no_listener_message};
+use seleniumbase_rs_plugin_shield::tor::{ControlAuth, TorConfig};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tor_support::control::{FakeControlPort, Script};
+use tor_support::{Answer, FakeSocksUpstream, dead_address, run};
 
 fn password_env(name: &str) -> Option<String> {
     (name == "TOR_CONTROL_PASSWORD").then(|| "s3cret".to_owned())

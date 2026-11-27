@@ -7,11 +7,19 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# Sandboxed WebAssembly plugin host (`wasmi`, no host imports, fuel and memory limits).
+wasm = ["dep:wasmi"]
+
 [dependencies]
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+wasmi = { version = "2", default-features = false, features = ["stable", "std", "validate", "auto-dispatch"], optional = true }
 
 [dev-dependencies]
 seleniumbase-rs-plugin-testing.workspace = true
+tempfile = "3.27.0"
+wat = "1.262.0"

@@ -1,81 +1,122 @@
-//! The options of the plugin, and the checks that make a bad one an error at
-//! start-up instead of a surprise at launch.
+//! Configuration for the containerized persistent `browser` plugin.
 
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::session;
-
 use seleniumbase_rs_plugin::{PluginError, Result};
-use serde::Deserialize;
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 
-/// Which extensions to load. The names are the ones Python SeleniumBase uses
-/// for `--extension-zip` and `--extension-dir`.
+use crate::{geo, session};
+
+/// Default folder storing containerized session bundles.
+pub(crate) const DEFAULT_SESSION_DIR: &str = "saved_sessions";
+
+/// Default message shown while `interactive` sign-in waits.
+pub(crate) const DEFAULT_PAUSE_MESSAGE: &str =
+    "Sign in in the browser window, then come back here.";
+
+/// Maximum length of `pause_message` in characters.
+const MAX_PAUSE_MESSAGE_CHARS: usize = 500;
+
+/// Maximum `ttl_secs` allowed (30 days).
+pub(crate) const MAX_TTL_SECS: u64 = 30 * 24 * 60 * 60;
+
+/// How exit proxies rotate across browser launches and isolated contexts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RotationMode {
+    /// Keep one sticky proxy per named container until rotated explicitly.
+    #[default]
+    Sticky,
+    /// Advance to the next proxy on every launch and every new browser context.
+    RoundRobin,
+    /// Keep the launch proxy for the default context and rotate on each new isolated context.
+    PerContext,
+}
+
+/// Options for [`BrowserSession`](crate::BrowserSession): `[plugins.browser]` in
+/// a settings file or `--plugin-opt 'browser.session="account-a"'`.
 ///
-/// Both options take a list of paths or one text with the paths separated by
-/// commas, as Python does; an empty text means none.
-///
-/// ```
-/// use seleniumbase_rs_plugin_browser::SessionConfig;
-///
-/// let config: SessionConfig = serde_json::from_value(serde_json::json!({
-///     "extension_zip": "dark-reader.crx, adblock.zip",
-///     "extension_dir": ["my-extension"],
-/// }))?;
-/// assert_eq!(config.extension_zip.len(), 2);
-/// assert_eq!(config.extension_dir.len(), 1);
-/// # Ok::<(), serde_json::Error>(())
-/// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+/// Containerizes browser state (cookies, `localStorage`, `sessionStorage`, open
+/// tab URLs, and identity metadata) with optional TTL expiry, geolocation
+/// targeting, IP auto-rotation, and interactive / multi-step SPA flow tasks.
+#[derive(Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SessionConfig {
-    /// `.zip` and `.crx` files, unpacked into a temporary folder for each
-    /// browser. Handled before `extension_dir`, as Python does.
-    #[serde(deserialize_with = "paths")]
-    pub extension_zip: Vec<PathBuf>,
-    /// Unpacked extension folders, loaded where they are and never changed.
-    #[serde(deserialize_with = "paths")]
-    pub extension_dir: Vec<PathBuf>,
-    /// Wait, once the browser answers, until every extension this plugin
-    /// loaded that has a service worker (`background.service_worker` in its
-    /// manifest) has a running one. Needs `extension_zip` or `extension_dir`,
-    /// and a host that reports extension service workers; a host that does
-    /// not makes the launch fail with a message naming this option.
-    pub wait_for_workers: bool,
-    /// How long `wait_for_workers` waits, from 1 to 30 seconds. The default is
-    /// 10. Refused unless `wait_for_workers` is on.
-    pub worker_timeout_secs: Option<u64>,
-    /// The name of a saved session: the cookies of the browser's default
-    /// context, kept in `<session_dir>/<name>.json`. They are put back when
-    /// the browser starts; a session that was never saved is a fresh start.
-    /// One to 64 letters, digits, `.`, `_` or `-`, starting with a letter or
-    /// digit.
+    /// Name of the persistent container (`1..=64` ASCII letters, digits, `.`, `_`, `-`).
+    /// Also accepts `"container"` in JSON/TOML.
+    #[serde(alias = "container")]
     pub session: Option<String>,
-    /// Save the cookies under `session` just before the browser closes. Needs
-    /// `session`, and a system with Unix file permissions.
+    /// Save cookies, storage, open tabs, and identity before close (`before_close`).
     pub save_on_close: bool,
-    /// The folder the session files live in. The default is `saved_sessions`
-    /// in the working directory of the program, made absolute when the plugin
-    /// is built. Needs `session`.
+    /// Folder storing container JSON bundles (default `saved_sessions`).
     pub session_dir: Option<PathBuf>,
-    /// Offer the task `sbrs plugin run browser`: it opens a tab, waits until a
-    /// person has signed in, and saves the session. Needs `session`, a headed
-    /// browser and a system with Unix file permissions.
+    /// Re-open saved `http://`/`https://` tab URLs when restoring a container (default `true`).
+    #[serde(default = "default_true")]
+    pub restore_tabs: bool,
+    /// Container Time-To-Live in seconds (`1..=2_592_000`). Expired containers reset cleanly on load.
+    pub ttl_secs: Option<u64>,
+    /// Two-letter ISO country code for geolocation targeting (derives default locale, timezone, coords).
+    pub country: Option<String>,
+    /// Explicit BCP 47 locale override (for example `"de-DE"`).
+    pub locale: Option<String>,
+    /// Explicit IANA timezone override (for example `"Europe/Berlin"`).
+    pub timezone: Option<String>,
+    /// Explicit `[latitude, longitude]` geolocation coordinates.
+    pub geolocation: Option<[f64; 2]>,
+    /// Explicit `User-Agent` override kept with the container identity.
+    pub user_agent: Option<String>,
+    /// Proxy URLs (`http://`, `https://`, `socks5://`, `socks5h://`) for IP auto-rotation.
+    /// Accepts a list or a comma-separated string. Credentials are never printed in `Debug`.
+    #[serde(deserialize_with = "string_list")]
+    pub proxies: Vec<String>,
+    /// Proxy rotation policy across launches and contexts (default `sticky`).
+    pub rotation: RotationMode,
+    /// Enable interactive manual sign-in capture for `sbrs plugin run browser` (needs headed browser).
     pub interactive: bool,
-    /// What the person is told while the task waits. Needs `interactive`.
+    /// Prompt shown while waiting during interactive sign-in.
     pub pause_message: Option<String>,
 }
 
-/// A path, a comma-separated text of paths, or a list of paths.
-struct Paths;
+const fn default_true() -> bool {
+    true
+}
 
-impl<'de> Visitor<'de> for Paths {
-    type Value = Vec<PathBuf>;
+impl fmt::Debug for SessionConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let redacted_proxies: Vec<String> = self
+            .proxies
+            .iter()
+            .map(|p| geo::redact_proxy_url(p))
+            .collect();
+        f.debug_struct("SessionConfig")
+            .field("session", &self.session)
+            .field("save_on_close", &self.save_on_close)
+            .field("session_dir", &self.session_dir)
+            .field("restore_tabs", &self.restore_tabs)
+            .field("ttl_secs", &self.ttl_secs)
+            .field("country", &self.country)
+            .field("locale", &self.locale)
+            .field("timezone", &self.timezone)
+            .field("geolocation", &self.geolocation)
+            .field("user_agent", &self.user_agent)
+            .field("proxies", &redacted_proxies)
+            .field("rotation", &self.rotation)
+            .field("interactive", &self.interactive)
+            .field("pause_message", &self.pause_message)
+            .finish()
+    }
+}
+
+struct StringList;
+
+impl<'de> Visitor<'de> for StringList {
+    type Value = Vec<String>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a path, a comma-separated text of paths, or a list of paths")
+        f.write_str("a comma-separated string or a list of strings")
     }
 
     fn visit_str<E: de::Error>(self, text: &str) -> std::result::Result<Self::Value, E> {
@@ -83,340 +124,315 @@ impl<'de> Visitor<'de> for Paths {
         if text.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(text
-            .split(',')
-            .map(|part| PathBuf::from(part.trim()))
-            .collect())
+        Ok(text.split(',').map(|part| part.trim().to_owned()).collect())
     }
 
     fn visit_seq<A: SeqAccess<'de>>(
         self,
         mut seq: A,
     ) -> std::result::Result<Self::Value, A::Error> {
-        let mut paths = Vec::new();
-        while let Some(path) = seq.next_element::<String>()? {
-            paths.push(PathBuf::from(path));
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element::<String>()? {
+            items.push(item);
         }
-        Ok(paths)
+        Ok(items)
     }
 }
 
-fn paths<'de, D: Deserializer<'de>>(
+fn string_list<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> std::result::Result<Vec<PathBuf>, D::Error> {
-    deserializer.deserialize_any(Paths)
+) -> std::result::Result<Vec<String>, D::Error> {
+    deserializer.deserialize_any(StringList)
 }
 
-/// How long `wait_for_workers` waits when `worker_timeout_secs` is not given.
-pub(crate) const DEFAULT_WORKER_TIMEOUT_SECS: u64 = 10;
-
-/// The most `worker_timeout_secs` may ask for.
-pub(crate) const MAX_WORKER_TIMEOUT_SECS: u64 = 30;
-
-/// The folder the session files live in when `session_dir` is not given.
-pub(crate) const DEFAULT_SESSION_DIR: &str = "saved_sessions";
-
-/// What the person is told while the interactive task waits, unless
-/// `pause_message` says otherwise.
-pub(crate) const DEFAULT_PAUSE_MESSAGE: &str =
-    "Sign in in the browser window, then come back here.";
-
-/// The longest `pause_message`, in characters.
-const MAX_PAUSE_MESSAGE_CHARS: usize = 500;
-
-fn bad(message: String) -> PluginError {
+fn bad(message: impl fmt::Display) -> PluginError {
     PluginError::Config(format!("browser: {message}"))
 }
 
-/// Builds a [`SessionConfig`]. [`SessionConfig::builder`] starts from the
-/// defaults; [`SessionConfig::into_builder`] starts from a config that already
-/// exists. Setters only store the value. [`build`](Self::build) runs the checks.
+/// Fluent builder for [`SessionConfig`].
 #[must_use = "a builder does nothing until `build` is called"]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SessionConfigBuilder {
     config: SessionConfig,
 }
 
+impl Default for SessionConfigBuilder {
+    fn default() -> Self {
+        Self {
+            config: SessionConfig::new(),
+        }
+    }
+}
+
 impl SessionConfigBuilder {
-    /// Adds a `.zip` or `.crx` file.
-    #[must_use = "a builder does nothing until `build` is called"]
-    pub fn zip(mut self, path: impl Into<PathBuf>) -> Self {
-        self.config.extension_zip.push(path.into());
-        self
-    }
-
-    /// Adds an unpacked extension folder.
-    #[must_use = "a builder does nothing until `build` is called"]
-    pub fn dir(mut self, path: impl Into<PathBuf>) -> Self {
-        self.config.extension_dir.push(path.into());
-        self
-    }
-
-    /// Turns `wait_for_workers` on or off.
-    #[must_use = "a builder does nothing until `build` is called"]
-    pub fn wait_for_workers(mut self, wait: bool) -> Self {
-        self.config.wait_for_workers = wait;
-        self
-    }
-
-    /// Sets how many seconds `wait_for_workers` waits.
-    #[must_use = "a builder does nothing until `build` is called"]
-    pub fn worker_timeout_secs(mut self, seconds: u64) -> Self {
-        self.config.worker_timeout_secs = Some(seconds);
-        self
-    }
-
-    /// Names the saved session to restore.
+    /// Names the persistent container (`session`).
     #[must_use = "a builder does nothing until `build` is called"]
     pub fn session(mut self, name: impl Into<String>) -> Self {
         self.config.session = Some(name.into());
         self
     }
 
-    /// Turns `save_on_close` on or off.
+    /// Alias for [`session`](Self::session).
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn container(self, name: impl Into<String>) -> Self {
+        self.session(name)
+    }
+
+    /// Enables or disables persisting full state before close.
     #[must_use = "a builder does nothing until `build` is called"]
     pub fn save_on_close(mut self, save: bool) -> Self {
         self.config.save_on_close = save;
         self
     }
 
-    /// Sets the folder the session files live in.
+    /// Sets the folder storing container state files.
     #[must_use = "a builder does nothing until `build` is called"]
     pub fn session_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.config.session_dir = Some(dir.into());
         self
     }
 
-    /// Turns `interactive` on or off.
+    /// Enables or disables re-opening persisted tabs on container restore.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn restore_tabs(mut self, restore: bool) -> Self {
+        self.config.restore_tabs = restore;
+        self
+    }
+
+    /// Sets container Time-To-Live in seconds (`1..=2_592_000`).
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn ttl_secs(mut self, secs: u64) -> Self {
+        self.config.ttl_secs = Some(secs);
+        self
+    }
+
+    /// Sets two-letter ISO country code for geolocation targeting.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn country(mut self, code: impl Into<String>) -> Self {
+        self.config.country = Some(code.into());
+        self
+    }
+
+    /// Sets an explicit BCP 47 locale override.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn locale(mut self, locale: impl Into<String>) -> Self {
+        self.config.locale = Some(locale.into());
+        self
+    }
+
+    /// Sets an explicit IANA timezone override.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn timezone(mut self, tz: impl Into<String>) -> Self {
+        self.config.timezone = Some(tz.into());
+        self
+    }
+
+    /// Sets explicit geolocation coordinates `(latitude, longitude)`.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn geolocation(mut self, latitude: f64, longitude: f64) -> Self {
+        self.config.geolocation = Some([latitude, longitude]);
+        self
+    }
+
+    /// Sets an explicit `User-Agent` override for this container.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn user_agent(mut self, ua: impl Into<String>) -> Self {
+        self.config.user_agent = Some(ua.into());
+        self
+    }
+
+    /// Adds a proxy URL to the rotation pool.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn proxy(mut self, url: impl Into<String>) -> Self {
+        self.config.proxies.push(url.into());
+        self
+    }
+
+    /// Adds multiple proxy URLs to the rotation pool.
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn proxies<I, S>(mut self, urls: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.config.proxies.extend(urls.into_iter().map(Into::into));
+        self
+    }
+
+    /// Sets the IP rotation mode (`sticky`, `round-robin`, `per-context`).
+    #[must_use = "a builder does nothing until `build` is called"]
+    pub fn rotation(mut self, mode: RotationMode) -> Self {
+        self.config.rotation = mode;
+        self
+    }
+
+    /// Enables or disables interactive manual sign-in capture.
     #[must_use = "a builder does nothing until `build` is called"]
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.config.interactive = interactive;
         self
     }
 
-    /// Sets what the person is told while the interactive task waits.
+    /// Sets the prompt message displayed during interactive sign-in.
     #[must_use = "a builder does nothing until `build` is called"]
     pub fn pause_message(mut self, message: impl Into<String>) -> Self {
         self.config.pause_message = Some(message.into());
         self
     }
 
-    /// Checks every option and returns the config.
+    /// Validates all options and builds the [`SessionConfig`].
     ///
     /// # Errors
     ///
-    /// [`PluginError::Config`] (the text contains `browser:` and names the
-    /// option) when an entry is empty, an `extension_dir` path holds a comma,
-    /// `wait_for_workers` is on without an extension, `worker_timeout_secs` is
-    /// set without that wait or is outside 1 to 30, `session` is not a valid
-    /// name, `save_on_close`, `session_dir` or `interactive` is set without
-    /// `session`, `session_dir` is empty or holds a NUL, saving a session is
-    /// asked for on a system without Unix file permissions, or `pause_message`
-    /// is set without `interactive`, is empty, is longer than 500 characters,
-    /// or holds a control character other than a newline.
-    pub fn build(self) -> Result<SessionConfig> {
-        self.config.check()?;
+    /// [`PluginError::Config`] naming the invalid option.
+    pub fn build(mut self) -> Result<SessionConfig> {
+        self.config.normalize_and_check()?;
         Ok(self.config)
     }
 }
 
 impl SessionConfig {
-    /// No extensions.
+    /// Default empty session config (`restore_tabs = true`).
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            restore_tabs: true,
+            ..Self::default()
+        }
     }
 
-    /// A builder that starts from the defaults: no extensions, and the other
-    /// options off.
+    /// Starts a [`SessionConfigBuilder`].
     #[must_use = "a builder does nothing until `build` is called"]
     pub fn builder() -> SessionConfigBuilder {
         SessionConfigBuilder::default()
     }
 
-    /// A builder that starts from this config.
+    /// Converts this config into a builder.
     #[must_use = "a builder does nothing until `build` is called"]
     pub fn into_builder(self) -> SessionConfigBuilder {
         SessionConfigBuilder { config: self }
     }
 
-    /// Whether no extension is configured.
+    /// Whether this config persists container state to disk.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.extension_zip.is_empty() && self.extension_dir.is_empty()
+    pub const fn saves(&self) -> bool {
+        self.save_on_close || self.interactive
     }
 
-    /// Every configured path: the archives first, then the folders.
-    pub(crate) fn sources(&self) -> Vec<PathBuf> {
-        let mut all = self.extension_zip.clone();
-        all.extend(self.extension_dir.iter().cloned());
-        all
-    }
-
-    /// Checks every option; the error names the option.
-    pub(crate) fn check(&self) -> Result<()> {
-        self.check_extensions()?;
-        self.check_workers()?;
-        self.check_session()?;
-        self.check_interactive()
-    }
-
-    /// The seconds `wait_for_workers` waits: `worker_timeout_secs`, else 10.
-    pub(crate) fn worker_timeout_secs_or_default(&self) -> u64 {
-        self.worker_timeout_secs
-            .unwrap_or(DEFAULT_WORKER_TIMEOUT_SECS)
-    }
-
-    /// What the interactive task tells the person.
-    pub(crate) fn pause_message_or_default(&self) -> &str {
+    /// Effective prompt message for interactive sign-in.
+    #[must_use]
+    pub fn pause_message_or_default(&self) -> &str {
         self.pause_message
             .as_deref()
             .unwrap_or(DEFAULT_PAUSE_MESSAGE)
     }
 
-    /// Whether the plugin saves a session: when the browser closes, or in the
-    /// interactive task.
-    pub(crate) fn saves(&self) -> bool {
-        self.save_on_close || self.interactive
+    /// Effective locale (explicit override or derived from `country`).
+    #[must_use]
+    pub fn effective_locale(&self) -> Option<&str> {
+        self.locale.as_deref().or_else(|| {
+            self.country
+                .as_deref()
+                .and_then(geo::lookup)
+                .map(|g| g.locale)
+        })
     }
 
-    fn check_extensions(&self) -> Result<()> {
-        for (option, list) in [
-            ("extension_zip", &self.extension_zip),
-            ("extension_dir", &self.extension_dir),
-        ] {
-            if list.iter().any(|p| p.to_string_lossy().trim().is_empty()) {
-                return Err(bad(format!("`{option}` has an empty entry")));
-            }
-        }
-        // Chrome takes the folders as one comma-separated list, and the host
-        // refuses a folder whose path holds a comma.
-        if let Some(path) = self
-            .extension_dir
-            .iter()
-            .find(|p| p.to_string_lossy().contains(','))
-        {
-            return Err(bad(format!(
-                "`extension_dir` entry `{}` holds a comma, which Chrome's list of extension folders cannot carry; rename the folder",
-                path.display()
-            )));
-        }
-        Ok(())
+    /// Effective timezone (explicit override or derived from `country`).
+    #[must_use]
+    pub fn effective_timezone(&self) -> Option<&str> {
+        self.timezone.as_deref().or_else(|| {
+            self.country
+                .as_deref()
+                .and_then(geo::lookup)
+                .map(|g| g.timezone)
+        })
     }
 
-    fn check_workers(&self) -> Result<()> {
-        if self.worker_timeout_secs.is_some() && !self.wait_for_workers {
-            return Err(bad(
-                "`worker_timeout_secs` needs `wait_for_workers`: there is no wait to limit"
-                    .to_owned(),
-            ));
-        }
-        if let Some(seconds) = self.worker_timeout_secs
-            && !(1..=MAX_WORKER_TIMEOUT_SECS).contains(&seconds)
-        {
-            return Err(bad(format!(
-                "`worker_timeout_secs` must be between 1 and {MAX_WORKER_TIMEOUT_SECS}, not {seconds}"
-            )));
-        }
-        if self.wait_for_workers && self.is_empty() {
-            return Err(bad(
-                    "`wait_for_workers` needs `extension_zip` or `extension_dir`: there is no extension to wait for"
-                        .to_owned(),
-                ));
-        }
-        Ok(())
+    /// Effective geolocation `(latitude, longitude)` (explicit override or derived from `country`).
+    #[must_use]
+    pub fn effective_geolocation(&self) -> Option<(f64, f64)> {
+        self.geolocation.map(|[lat, lon]| (lat, lon)).or_else(|| {
+            self.country
+                .as_deref()
+                .and_then(geo::lookup)
+                .map(|g| (g.latitude, g.longitude))
+        })
     }
 
-    fn check_session(&self) -> Result<()> {
-        match &self.session {
-            Some(name) if !session::valid_name(name) => {
-                return Err(bad(format!(
-                    "`session` {name:?} is not a valid name: use 1 to 64 letters, digits, `.`, `_` or `-`, starting with a letter or a digit"
-                )));
-            }
-            Some(_) => {}
-            None => {
-                for (on, option, why) in [
-                    (
-                        self.save_on_close,
-                        "save_on_close",
-                        "there is no name to save the cookies under",
-                    ),
-                    (
-                        self.session_dir.is_some(),
-                        "session_dir",
-                        "there is no session file to put in it",
-                    ),
-                    (
-                        self.interactive,
-                        "interactive",
-                        "there is no session to save the sign-in under",
-                    ),
-                ] {
-                    if on {
-                        return Err(bad(format!("`{option}` needs `session`: {why}")));
-                    }
-                }
-            }
+    /// Normalizes country codes and validates all options.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Config`] naming the invalid option.
+    pub(crate) fn normalize_and_check(&mut self) -> Result<()> {
+        if let Some(ref name) = self.session {
+            session::check_name(name).map_err(bad)?;
         }
-        if let Some(dir) = &self.session_dir {
+        if self.save_on_close && self.session.is_none() {
+            return Err(bad("`save_on_close` requires `session` (or `container`)"));
+        }
+        if self.session_dir.is_some() && self.session.is_none() {
+            return Err(bad("`session_dir` requires `session` (or `container`)"));
+        }
+        if self.interactive && self.session.is_none() {
+            return Err(bad("`interactive` requires `session` (or `container`)"));
+        }
+        if let Some(ref dir) = self.session_dir {
             let text = dir.to_string_lossy();
             if text.trim().is_empty() || text.contains('\0') {
+                return Err(bad("`session_dir` must be a non-empty path without NUL"));
+            }
+        }
+        if let Some(ttl) = self.ttl_secs {
+            if self.session.is_none() {
+                return Err(bad("`ttl_secs` requires `session` (or `container`)"));
+            }
+            if !(1..=MAX_TTL_SECS).contains(&ttl) {
+                return Err(bad(format!(
+                    "`ttl_secs` must be between 1 and {MAX_TTL_SECS}, got {ttl}"
+                )));
+            }
+        }
+        if let Some(ref country) = self.country {
+            self.country = Some(geo::normalize_country(country)?);
+        }
+        if let Some([lat, lon]) = self.geolocation
+            && (!lat.is_finite()
+                || !lon.is_finite()
+                || !(-90.0..=90.0).contains(&lat)
+                || !(-180.0..=180.0).contains(&lon))
+        {
+            return Err(bad(
+                "`geolocation` must be finite [latitude, longitude] within [-90, 90] and [-180, 180]",
+            ));
+        }
+        for proxy in &self.proxies {
+            geo::validate_proxy_url(proxy)?;
+        }
+        if let Some(ref msg) = self.pause_message {
+            if !self.interactive {
+                return Err(bad("`pause_message` requires `interactive = true`"));
+            }
+            if msg.trim().is_empty() {
+                return Err(bad("`pause_message` cannot be empty"));
+            }
+            if msg.chars().count() > MAX_PAUSE_MESSAGE_CHARS {
+                return Err(bad(format!(
+                    "`pause_message` cannot exceed {MAX_PAUSE_MESSAGE_CHARS} characters"
+                )));
+            }
+            if msg.chars().any(|c| c.is_control() && c != '\n') {
                 return Err(bad(
-                    "`session_dir` is empty or holds a NUL character".to_owned()
+                    "`pause_message` may not contain control characters other than newline",
                 ));
             }
         }
-        // Files are written with mode 0600 through a temporary file, which
-        // needs Unix permissions; ACLs are not handled yet.
-        if cfg!(not(unix)) && self.saves() {
+        if self.saves() && !cfg!(unix) {
             return Err(bad(
-                    "saving a session (`save_on_close`, `interactive`) needs Unix file permissions, which this system does not have"
-                        .to_owned(),
-                ));
-        }
-        Ok(())
-    }
-
-    fn check_interactive(&self) -> Result<()> {
-        let Some(message) = &self.pause_message else {
-            return Ok(());
-        };
-        if !self.interactive {
-            return Err(bad(
-                "`pause_message` needs `interactive`: there is no pause to describe".to_owned(),
-            ));
-        }
-        if message.trim().is_empty() {
-            return Err(bad("`pause_message` is empty".to_owned()));
-        }
-        if message.chars().count() > MAX_PAUSE_MESSAGE_CHARS {
-            return Err(bad(format!(
-                "`pause_message` is longer than {MAX_PAUSE_MESSAGE_CHARS} characters"
-            )));
-        }
-        if message.chars().any(|c| c.is_control() && c != '\n') {
-            return Err(bad(
-                "`pause_message` holds a control character; use plain text".to_owned(),
+                "saving a session requires Unix owner-only file permissions",
             ));
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_refuses_a_wait_with_no_extension() {
-        let error = SessionConfig::builder()
-            .wait_for_workers(true)
-            .build()
-            .expect_err("no extension to wait for");
-        assert!(matches!(error, PluginError::Config(_)), "{error:?}");
-        let text = error.to_string();
-        assert!(text.starts_with("plugin configuration: browser:"), "{text}");
-        assert!(text.contains("`wait_for_workers`"), "{text}");
     }
 }

@@ -1,9 +1,10 @@
+#![cfg(feature = "wasm")]
 //! The README is the ABI's documentation: keep what it says true.
 
+use seleniumbase_rs_plugin::wasm::{ABI_VERSION, FORBIDDEN_FLAGS, Limits, WasmPlugin};
 use seleniumbase_rs_plugin::{Package, Plugin};
-use seleniumbase_rs_plugin_wasm::{ABI_VERSION, FORBIDDEN_FLAGS, Limits, WasmPlugin};
 
-const README: &str = include_str!("../README.md");
+const README: &str = include_str!("../WASM_README.md");
 const HELLO: &str = include_str!("../examples/hello.wat");
 
 #[test]

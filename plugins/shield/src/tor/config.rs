@@ -86,7 +86,7 @@ impl ControlAuth {
     }
 }
 
-/// The options of [`Tor`](crate::Tor): `[plugins.tor]` in a config file,
+/// The options of [`Tor`](super::Tor): `[plugins.tor]` in a config file,
 /// `--plugin-opt 'tor.socks="127.0.0.1:9150"'` on the command line.
 ///
 /// An option that is not listed here is an error, so a typo does not turn a

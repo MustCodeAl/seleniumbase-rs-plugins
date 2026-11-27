@@ -1954,7 +1954,10 @@ dependencies = [
  "seleniumbase-rs-plugin-testing",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
+ "wasmi",
+ "wat",
 ]
 
 [[package]]
@@ -1997,12 +2000,10 @@ name = "seleniumbase-rs-plugin-browser"
 version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
- "seleniumbase-rs-plugin-crx",
  "seleniumbase-rs-plugin-testing",
  "serde",
  "serde_json",
  "tempfile",
- "zip",
 ]
 
 [[package]]
@@ -2038,6 +2039,7 @@ version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
+ "serde",
  "serde_json",
  "tempfile",
  "zip",
@@ -2129,10 +2131,13 @@ dependencies = [
 name = "seleniumbase-rs-plugin-shield"
 version = "0.10.0"
 dependencies = [
+ "ring",
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-testing",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2145,49 +2150,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "seleniumbase-rs-plugin-tor"
-version = "0.10.0"
-dependencies = [
- "ring",
- "seleniumbase-rs-plugin",
- "seleniumbase-rs-plugin-browser",
- "seleniumbase-rs-plugin-testing",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "seleniumbase-rs-plugin-wasm"
-version = "0.10.0"
-dependencies = [
- "seleniumbase-rs-plugin",
- "seleniumbase-rs-plugin-testing",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "wasmi",
- "wat",
-]
-
-[[package]]
 name = "seleniumbase-rs-plugins-builtin"
 version = "0.10.0"
 dependencies = [
  "seleniumbase-rs-plugin",
  "seleniumbase-rs-plugin-batcher",
- "seleniumbase-rs-plugin-block-resources",
  "seleniumbase-rs-plugin-browser",
  "seleniumbase-rs-plugin-crawler",
  "seleniumbase-rs-plugin-crx",
  "seleniumbase-rs-plugin-extractor",
  "seleniumbase-rs-plugin-fetcher",
- "seleniumbase-rs-plugin-imap",
  "seleniumbase-rs-plugin-shield",
  "seleniumbase-rs-plugin-testing",
- "seleniumbase-rs-plugin-tor",
  "serde_json",
 ]
 

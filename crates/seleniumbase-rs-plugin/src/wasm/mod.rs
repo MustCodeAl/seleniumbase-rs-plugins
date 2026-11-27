@@ -1,6 +1,4 @@
-#![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)]
-#![warn(missing_docs)]
+//! Sandboxed WebAssembly plugin host (`wasmi`, feature `wasm`).
 
 mod abi;
 mod error;
@@ -12,7 +10,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use seleniumbase_rs_plugin::{
+use crate::{
     Capability, Category, HostScope, LaunchSettings, Metadata, Package, PageHandle, Plugin,
     Requirements, Result, async_trait,
 };

@@ -1,10 +1,11 @@
+#![cfg(feature = "tor")]
 //! The options of the tor plugin: defaults, parsing, validation.
 
 use std::net::SocketAddr;
 
 use seleniumbase_rs_plugin::PluginError;
 use seleniumbase_rs_plugin::config::options;
-use seleniumbase_rs_plugin_tor::{ControlAuth, Isolation, TorConfig};
+use seleniumbase_rs_plugin_shield::tor::{ControlAuth, Isolation, TorConfig};
 use serde_json::json;
 
 fn parse(value: serde_json::Value) -> Result<TorConfig, PluginError> {

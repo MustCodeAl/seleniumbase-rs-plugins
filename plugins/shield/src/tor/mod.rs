@@ -7,7 +7,7 @@
 //!
 //! ```
 //! use seleniumbase_rs_plugin::PluginSet;
-//! use seleniumbase_rs_plugin_tor::{Isolation, Tor, TorConfig};
+//! use seleniumbase_rs_plugin_shield::tor::{Isolation, Tor, TorConfig};
 //!
 //! let tor = Tor::new(TorConfig::new().isolation(Isolation::PerContext))?;
 //! let plugins = PluginSet::strict().with(tor)?;
@@ -91,7 +91,6 @@
 //!
 //! The behaviour of Chrome that the design rests on was checked with Chrome
 //! 156 against a fake SOCKS5 listener; see the README of this crate.
-#![warn(missing_docs)]
 
 mod config;
 mod control;

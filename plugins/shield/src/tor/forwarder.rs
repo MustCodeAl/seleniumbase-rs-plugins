@@ -24,7 +24,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::task::{JoinHandle, JoinSet};
 
-use crate::socks::{self, Credentials, Error, NO_ACCEPTABLE, NO_AUTH, rep};
+use super::socks::{self, Credentials, Error, NO_ACCEPTABLE, NO_AUTH, rep};
 
 /// The user name sent to Tor. It starts with the `<torS0X>` marker, and the
 /// `0` after it says that the password is the stream isolation parameter

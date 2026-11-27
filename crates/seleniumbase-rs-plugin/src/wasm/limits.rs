@@ -7,7 +7,7 @@
 /// [`Limits::builder`], which starts from the defaults.
 ///
 /// ```
-/// use seleniumbase_rs_plugin_wasm::Limits;
+/// use seleniumbase_rs_plugin::wasm::Limits;
 ///
 /// let limits = Limits::builder().fuel_per_call(1_000_000).build();
 /// assert_eq!(limits.fuel_per_call, 1_000_000);

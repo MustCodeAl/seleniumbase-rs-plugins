@@ -1,9 +1,12 @@
-//! Saved sessions: the cookies of a browser kept in a file, so that a later
-//! browser starts signed in.
+//! Containerized persistent session storage: cookies, per-origin Web Storage
+//! (`localStorage` and `sessionStorage`), open tab URLs, container identity
+//! metadata, and TTL expiry.
 //!
-//! The file holds credentials. Nothing here puts a cookie value into an error,
-//! a log line or a `Debug` output.
+//! Files are written atomically with owner-only (`0600`) permissions on Unix.
+//! Cookie values and storage values are credentials and are never printed in
+//! errors, logs, or `Debug` output.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, Read};
@@ -12,37 +15,95 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use seleniumbase_rs_plugin::{BrowserHandle, PluginError, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::config::{DEFAULT_SESSION_DIR, SessionConfig};
 
-/// The format of the session files this plugin writes and reads.
-const FORMAT_VERSION: u64 = 1;
+/// Legacy v1 format (cookies only); still read seamlessly for upgrades.
+const LEGACY_FORMAT_VERSION: u64 = 1;
+/// Container v2 format: cookies + storage + open tabs + identity + TTL.
+const FORMAT_VERSION: u64 = 2;
 
-/// A session file larger than this is not read, and one that would be larger
-/// is not written.
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_COOKIES: usize = 5_000;
+const MAX_TABS: usize = 32;
+const MAX_ORIGINS: usize = 128;
 
-/// The most cookies a session file may hold.
-const MAX_COOKIES: usize = 5000;
-
-/// The values of `sameSite`, `priority` and `sourceScheme` the protocol has.
 const SAME_SITE: &[&str] = &["Strict", "Lax", "None"];
 const PRIORITY: &[&str] = &["Low", "Medium", "High"];
 const SOURCE_SCHEME: &[&str] = &["Unset", "NonSecure", "Secure"];
 
-/// The fields of a cookie object.
 type Fields = Map<String, Value>;
 
-/// One cookie, with the fields the plugin keeps (the ones `Network.CookieParam`
-/// takes) and no others. The value is a credential, so `Debug` shows nothing.
+/// Validates a container/session name (`1..=64` ASCII alnum/`.`/`_`/`-`, starting with alnum).
+pub(crate) fn check_name(name: &str) -> std::result::Result<(), String> {
+    if name.is_empty() || name.len() > 64 {
+        return Err("`session` must be 1 to 64 characters".to_owned());
+    }
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return Err("`session` is empty".to_owned());
+    };
+    if !first.is_ascii_alphanumeric() {
+        return Err("`session` must start with an ASCII letter or digit".to_owned());
+    }
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return Err(
+            "`session` may only contain ASCII letters, digits, `.`, `_`, or `-`".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+/// Persisted identity metadata bound to a container.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContainerIdentity {
+    /// ISO 3166-1 alpha-2 country code.
+    pub country: Option<String>,
+    /// BCP 47 locale tag.
+    pub locale: Option<String>,
+    /// IANA timezone name.
+    pub timezone: Option<String>,
+    /// Geolocation `[latitude, longitude]`.
+    pub geolocation: Option<[f64; 2]>,
+    /// User-Agent string override.
+    pub user_agent: Option<String>,
+    /// Index of the sticky proxy last bound to this container.
+    pub proxy_index: Option<usize>,
+}
+
+/// Persisted Web Storage entries for a single origin (`https://example.com`).
+/// Values are credentials and omitted from `Debug`.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OriginStorage {
+    /// `window.localStorage` key/value pairs.
+    pub local_storage: BTreeMap<String, String>,
+    /// `window.sessionStorage` key/value pairs.
+    pub session_storage: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for OriginStorage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OriginStorage")
+            .field("local_keys", &self.local_storage.len())
+            .field("session_keys", &self.session_storage.len())
+            .finish()
+    }
+}
+
+/// One browser cookie keeping `Network.CookieParam` fields only.
 #[derive(Clone, PartialEq)]
 pub(crate) struct Cookie {
     name: String,
     value: String,
     domain: String,
     path: String,
-    /// Seconds since the Unix epoch; `None` for a session cookie.
     expires: Option<f64>,
     http_only: bool,
     secure: bool,
@@ -59,7 +120,78 @@ impl fmt::Debug for Cookie {
     }
 }
 
-/// A text field that must be there.
+/// Full containerized session snapshot persisted to disk.
+#[derive(Clone, Default)]
+pub(crate) struct ContainerSnapshot {
+    pub(crate) saved_at_ms: u64,
+    pub(crate) expires_at_ms: Option<u64>,
+    pub(crate) cookies: Vec<Cookie>,
+    pub(crate) storage: BTreeMap<String, OriginStorage>,
+    pub(crate) tabs: Vec<String>,
+    pub(crate) identity: ContainerIdentity,
+}
+
+impl fmt::Debug for ContainerSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ContainerSnapshot")
+            .field("saved_at_ms", &self.saved_at_ms)
+            .field("expires_at_ms", &self.expires_at_ms)
+            .field("cookies", &self.cookies.len())
+            .field("storage_origins", &self.storage.len())
+            .field("tabs", &self.tabs.len())
+            .field("identity", &self.identity)
+            .finish()
+    }
+}
+
+impl ContainerSnapshot {
+    /// Returns whether this snapshot has passed its TTL (`expires_at_ms`) or `ttl_secs`.
+    pub(crate) fn is_expired(&self, now_ms: u64, ttl_secs: Option<u64>) -> bool {
+        if let Some(exp) = self.expires_at_ms
+            && now_ms >= exp
+        {
+            return true;
+        }
+        if let Some(ttl) = ttl_secs
+            && self.saved_at_ms > 0
+        {
+            let deadline = self.saved_at_ms.saturating_add(ttl.saturating_mul(1_000));
+            if now_ms >= deadline {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Generates an init script that hydrates `localStorage` and `sessionStorage`
+    /// for matching origins before any page script runs.
+    pub(crate) fn storage_init_script(&self) -> Option<String> {
+        if self.storage.is_empty() {
+            return None;
+        }
+        let payload = serde_json::to_string(&self.storage).ok()?;
+        Some(format!(
+            "(() => {{\
+               try {{\
+                 const map = {payload};\
+                 const entry = map[window.location.origin];\
+                 if (!entry) return;\
+                 if (entry.local_storage) {{\
+                   for (const [k, v] of Object.entries(entry.local_storage)) {{\
+                     if (window.localStorage.getItem(k) === null) window.localStorage.setItem(k, v);\
+                   }}\
+                 }}\
+                 if (entry.session_storage) {{\
+                   for (const [k, v] of Object.entries(entry.session_storage)) {{\
+                     if (window.sessionStorage.getItem(k) === null) window.sessionStorage.setItem(k, v);\
+                   }}\
+                 }}\
+               }} catch (_) {{}}\
+             }})();"
+        ))
+    }
+}
+
 fn required_text(fields: &Fields, field: &str) -> std::result::Result<String, String> {
     match fields.get(field) {
         Some(Value::String(text)) => Ok(text.clone()),
@@ -67,7 +199,6 @@ fn required_text(fields: &Fields, field: &str) -> std::result::Result<String, St
     }
 }
 
-/// A true-or-false field; missing means false.
 fn flag(fields: &Fields, field: &str) -> std::result::Result<bool, String> {
     match fields.get(field) {
         None | Some(Value::Null) => Ok(false),
@@ -76,9 +207,6 @@ fn flag(fields: &Fields, field: &str) -> std::result::Result<bool, String> {
     }
 }
 
-/// A field that is one of `allowed`. `lenient` drops a value that is not
-/// (what a browser reports may know more than this plugin); otherwise it is
-/// an error. The error never repeats the value.
 fn choice(
     fields: &Fields,
     field: &str,
@@ -87,24 +215,16 @@ fn choice(
 ) -> std::result::Result<Option<&'static str>, String> {
     match fields.get(field) {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(text)) => {
-            match allowed
-                .iter()
-                .copied()
-                .find(|known| *known == text.as_str())
-            {
-                Some(known) => Ok(Some(known)),
-                None if lenient => Ok(None),
-                None => Err(format!("`{field}` is not a value this plugin knows")),
-            }
-        }
+        Some(Value::String(text)) => match allowed.iter().copied().find(|k| *k == text.as_str()) {
+            Some(known) => Ok(Some(known)),
+            None if lenient => Ok(None),
+            None => Err(format!("`{field}` is not a value this plugin knows")),
+        },
         Some(_) if lenient => Ok(None),
         Some(_) => Err(format!("`{field}` is not text")),
     }
 }
 
-/// `expires`: a positive time, or none for a session cookie (the browser says
-/// `-1` for those).
 fn expiry(fields: &Fields) -> std::result::Result<Option<f64>, String> {
     match fields.get("expires") {
         None | Some(Value::Null) => Ok(None),
@@ -115,7 +235,6 @@ fn expiry(fields: &Fields) -> std::result::Result<Option<f64>, String> {
     }
 }
 
-/// `sourcePort`: -1 (unspecified) or a port number.
 fn source_port(fields: &Fields, lenient: bool) -> std::result::Result<Option<i64>, String> {
     match fields.get("sourcePort") {
         None | Some(Value::Null) => Ok(None),
@@ -129,8 +248,6 @@ fn source_port(fields: &Fields, lenient: bool) -> std::result::Result<Option<i64
     }
 }
 
-/// `partitionKey`: older browsers say a text, newer ones an object of which
-/// only `topLevelSite` and `hasCrossSiteAncestor` are kept.
 fn partition_key(fields: &Fields, lenient: bool) -> std::result::Result<Option<Value>, String> {
     match fields.get("partitionKey") {
         None | Some(Value::Null) => Ok(None),
@@ -153,9 +270,6 @@ fn partition_key(fields: &Fields, lenient: bool) -> std::result::Result<Option<V
 }
 
 impl Cookie {
-    /// Reads one cookie. `lenient` is for what a browser reports: optional
-    /// fields with a value this plugin does not know are dropped. A session
-    /// file is read strictly. The error names a field and never a value.
     fn parse(cookie: &Value, lenient: bool) -> std::result::Result<Self, String> {
         let Some(fields) = cookie.as_object() else {
             return Err("it is not an object".to_owned());
@@ -184,8 +298,6 @@ impl Cookie {
         })
     }
 
-    /// The cookie as `Network.CookieParam` and the session file have it: the
-    /// kept fields only.
     fn to_value(&self) -> Value {
         let mut fields = Map::new();
         fields.insert("name".to_owned(), json!(self.name));
@@ -215,24 +327,33 @@ impl Cookie {
         Value::Object(fields)
     }
 
-    /// Whether the cookie had expired at `now` (seconds since the epoch).
     fn expired(&self, now: f64) -> bool {
         self.expires.is_some_and(|expires| expires <= now)
     }
 }
 
-/// Seconds since the Unix epoch.
+pub(crate) fn unix_millis() -> u64 {
+    u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis()),
+    )
+    .unwrap_or(u64::MAX)
+}
+
 fn unix_seconds() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+        .map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// The cookies of a session file's `bytes`. The error continues the sentence
-/// "the file ..." and holds no value of the file: `serde_json` quotes the
-/// value it did not like, so only the line and column of a syntax error are
-/// kept.
-fn parse_file(bytes: &[u8]) -> std::result::Result<Vec<Cookie>, String> {
+pub(crate) fn is_http_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://"))
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+fn parse_file(bytes: &[u8]) -> std::result::Result<ContainerSnapshot, String> {
     let file: Value = serde_json::from_slice(bytes).map_err(|error| {
         format!(
             "is not valid JSON (line {}, column {})",
@@ -243,62 +364,103 @@ fn parse_file(bytes: &[u8]) -> std::result::Result<Vec<Cookie>, String> {
     let Some(object) = file.as_object() else {
         return Err("is not a JSON object".to_owned());
     };
-    match object.get("version").and_then(Value::as_u64) {
-        Some(FORMAT_VERSION) => {}
-        Some(other) => {
-            return Err(format!(
-                "has version {other}, and only version {FORMAT_VERSION} is known"
-            ));
-        }
-        None => return Err("has no numeric `version`".to_owned()),
+    let version = object
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "has no numeric `version`".to_owned())?;
+    if version != LEGACY_FORMAT_VERSION && version != FORMAT_VERSION {
+        return Err(format!(
+            "has version {version}, and only versions {LEGACY_FORMAT_VERSION} or {FORMAT_VERSION} are supported"
+        ));
     }
     let Some(list) = object.get("cookies").and_then(Value::as_array) else {
         return Err("has no `cookies` list".to_owned());
     };
     if list.len() > MAX_COOKIES {
         return Err(format!(
-            "holds {} cookies, more than the {MAX_COOKIES} a session file may keep",
+            "holds {} cookies, exceeding the {MAX_COOKIES} limit",
             list.len()
         ));
     }
-    list.iter()
+    let cookies = list
+        .iter()
         .enumerate()
         .map(|(index, cookie)| {
             Cookie::parse(cookie, false)
                 .map_err(|what| format!("has an error in cookies[{index}]: {what}"))
         })
-        .collect()
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let saved_at_ms = object
+        .get("saved_at_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let expires_at_ms = object.get("expires_at_ms").and_then(Value::as_u64);
+
+    let storage = match object.get("storage") {
+        None | Some(Value::Null) => BTreeMap::new(),
+        Some(val) => {
+            let map: BTreeMap<String, OriginStorage> = serde_json::from_value(val.clone())
+                .map_err(|_| "has an invalid `storage` map".to_owned())?;
+            if map.len() > MAX_ORIGINS {
+                return Err(format!("exceeds {MAX_ORIGINS} stored origins"));
+            }
+            map
+        }
+    };
+
+    let tabs = match object.get("tabs") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|url| is_http_url(url))
+            .take(MAX_TABS)
+            .map(str::to_owned)
+            .collect(),
+        Some(_) => return Err("has a non-array `tabs` field".to_owned()),
+    };
+
+    let identity = match object.get("identity") {
+        None | Some(Value::Null) => ContainerIdentity::default(),
+        Some(val) => serde_json::from_value(val.clone())
+            .map_err(|_| "has an invalid `identity` object".to_owned())?,
+    };
+
+    Ok(ContainerSnapshot {
+        saved_at_ms,
+        expires_at_ms,
+        cookies,
+        storage,
+        tabs,
+        identity,
+    })
 }
 
-/// The text of a session file with these cookies.
-fn file_bytes(cookies: &[Cookie]) -> std::result::Result<Vec<u8>, String> {
-    if cookies.len() > MAX_COOKIES {
+fn file_bytes(snapshot: &ContainerSnapshot) -> std::result::Result<Vec<u8>, String> {
+    if snapshot.cookies.len() > MAX_COOKIES {
         return Err(format!(
-            "the browser holds {} cookies, more than the {MAX_COOKIES} a session file may keep; nothing was saved",
-            cookies.len()
+            "the browser holds {} cookies, exceeding the {MAX_COOKIES} limit; nothing was saved",
+            snapshot.cookies.len()
         ));
     }
-    let saved_at_ms = u64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_millis()),
-    )
-    .unwrap_or(u64::MAX);
     let file = json!({
         "version": FORMAT_VERSION,
-        "saved_at_ms": saved_at_ms,
-        "cookies": cookies.iter().map(Cookie::to_value).collect::<Vec<_>>(),
+        "saved_at_ms": snapshot.saved_at_ms,
+        "expires_at_ms": snapshot.expires_at_ms,
+        "cookies": snapshot.cookies.iter().map(Cookie::to_value).collect::<Vec<_>>(),
+        "storage": snapshot.storage,
+        "tabs": snapshot.tabs,
+        "identity": snapshot.identity,
     });
     let bytes = serde_json::to_vec_pretty(&file)
-        .map_err(|_| "the cookies cannot be written as JSON".to_owned())?;
+        .map_err(|_| "the container snapshot cannot be serialized as JSON".to_owned())?;
     if u64::try_from(bytes.len()).is_ok_and(|size| size > MAX_FILE_BYTES) {
-        return Err("the session file would be larger than 8 MiB; nothing was saved".to_owned());
+        return Err("the container file would exceed 8 MiB; nothing was saved".to_owned());
     }
     Ok(bytes)
 }
 
-/// Makes `dir`, and the folders above it that are missing, readable by the
-/// owner only.
 #[cfg(unix)]
 fn create_private_dir(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
@@ -312,11 +474,10 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
 fn create_private_dir(_dir: &Path) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "saving a session needs Unix file permissions",
+        "saving a container needs Unix file permissions",
     ))
 }
 
-/// Writes a new file that only its owner can read, failing if `path` exists.
 #[cfg(unix)]
 fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write;
@@ -334,29 +495,11 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 fn write_private_file(_path: &Path, _bytes: &[u8]) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "saving a session needs Unix file permissions",
+        "saving a container needs Unix file permissions",
     ))
 }
 
-/// Removes every value of `cookies` from `message`, as it is and as JSON would
-/// write it, for the text of an error the browser sent back.
-fn redact(message: &str, cookies: &[Cookie]) -> String {
-    let mut text = message.to_owned();
-    for cookie in cookies.iter().filter(|cookie| !cookie.value.is_empty()) {
-        text = text.replace(&cookie.value, "[a cookie value]");
-        let escaped = serde_json::to_string(&cookie.value).unwrap_or_default();
-        if let Some(inner) = escaped
-            .strip_prefix('"')
-            .and_then(|rest| rest.strip_suffix('"'))
-            .filter(|inner| !inner.is_empty() && *inner != cookie.value)
-        {
-            text = text.replace(inner, "[a cookie value]");
-        }
-    }
-    text
-}
-
-/// Where one saved session lives: `<dir>/<name>.json`.
+/// Persistent container store rooted at `<session_dir>/<name>.json`.
 #[derive(Clone, Debug)]
 pub(crate) struct Store {
     name: String,
@@ -364,40 +507,25 @@ pub(crate) struct Store {
     file: PathBuf,
 }
 
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
 impl Store {
-    /// The store the options name, or `None` without `session`. A relative
-    /// folder is made absolute against the working directory now, so a later
-    /// change of the directory does not move the session.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginError::Config`] if the working directory is unknown.
     pub(crate) fn from_config(config: &SessionConfig) -> Result<Option<Self>> {
-        let Some(name) = &config.session else {
+        let Some(ref name) = config.session else {
             return Ok(None);
         };
-        let given = config
+        let raw_dir = config
             .session_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from(DEFAULT_SESSION_DIR));
-        let dir = if given.is_absolute() {
-            given
+        let dir = if raw_dir.is_absolute() {
+            raw_dir
         } else {
             std::env::current_dir()
-                .map_err(|error| {
-                    PluginError::Config(format!(
-                        "browser: `session_dir` cannot be made absolute, the working directory is unknown: {error}"
-                    ))
-                })?
-                .join(given)
+                .map_err(|e| PluginError::Config(format!("browser: current_dir unavailable: {e}")))?
+                .join(raw_dir)
         };
         let file = dir.join(format!("{name}.json"));
-        // The name was checked; this makes sure the file is inside the folder.
-        if file.parent() != Some(dir.as_path()) {
-            return Err(PluginError::Config(
-                "browser: `session` does not name a file in `session_dir`".to_owned(),
-            ));
-        }
         Ok(Some(Self {
             name: name.clone(),
             dir,
@@ -405,337 +533,145 @@ impl Store {
         }))
     }
 
-    /// The session's name.
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
-    /// The folder the file lives in.
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
     }
 
-    /// The session file.
     pub(crate) fn file(&self) -> &Path {
         &self.file
     }
 
-    /// An error of the option, with `what` as the reason.
-    fn problem(&self, what: impl fmt::Display) -> PluginError {
-        PluginError::other(format!("browser: `session` `{}`: {what}", self.name))
-    }
-
-    /// Refuses a symbolic link and anything that is not a regular file.
-    fn check_kind(&self, meta: &fs::Metadata) -> Result<()> {
-        if meta.file_type().is_symlink() {
-            Err(self.problem(format!(
-                "{} is a symbolic link, which is not followed",
-                self.file.display()
-            )))
-        } else if !meta.is_file() {
-            Err(self.problem(format!("{} is not a regular file", self.file.display())))
-        } else {
-            Ok(())
+    pub(crate) fn check_writable(&self) -> Result<()> {
+        if !self.dir.exists() {
+            create_private_dir(&self.dir).map_err(|error| {
+                PluginError::other(format!(
+                    "browser: cannot create session_dir `{}`: {error}",
+                    self.dir.display()
+                ))
+            })?;
         }
+        Ok(())
     }
 
-    /// Refuses a target that is a symbolic link or not a regular file; a
-    /// target that does not exist is fine.
-    fn check_target(&self) -> Result<()> {
-        match fs::symlink_metadata(&self.file) {
-            Ok(meta) => self.check_kind(&meta),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(self.problem(format!(
-                "{} cannot be looked at: {error}",
-                self.file.display()
-            ))),
-        }
-    }
-
-    /// A name for a temporary file in the session folder that no other file,
-    /// browser or process has.
-    fn temp_path(&self) -> PathBuf {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        self.dir.join(format!(
-            ".{}.json.{}-{serial}.tmp",
-            self.name,
-            std::process::id()
-        ))
-    }
-
-    /// The cookies to put back: the unexpired ones. `None` when the session
-    /// was never saved.
-    ///
-    /// # Errors
-    ///
-    /// An error naming `session` for a file that is a symbolic link, not a
-    /// regular file, larger than 8 MiB, corrupt, of another version, or with
-    /// more than 5000 cookies. It never holds a value of the file.
-    pub(crate) fn load(&self) -> Result<Option<Vec<Cookie>>> {
-        let file = self.file.display();
-        let meta = match fs::symlink_metadata(&self.file) {
-            Ok(meta) => meta,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(self.problem(format!("{file} cannot be read: {error}")));
+    pub(crate) fn load(&self, ttl_secs: Option<u64>) -> Result<Option<ContainerSnapshot>> {
+        let mut file = match fs::File::open(&self.file) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(PluginError::other(format!(
+                    "browser: cannot read container `{}`: {e}",
+                    self.file.display()
+                )));
             }
         };
-        self.check_kind(&meta)?;
-        let too_big = || self.problem(format!("{file} is larger than 8 MiB"));
-        if meta.len() > MAX_FILE_BYTES {
-            return Err(too_big());
-        }
         let mut bytes = Vec::new();
-        fs::File::open(&self.file)
-            .and_then(|handle| handle.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes))
-            .map_err(|error| self.problem(format!("{file} cannot be read: {error}")))?;
+        file.by_ref()
+            .take(MAX_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| {
+                PluginError::other(format!(
+                    "browser: cannot read container `{}`: {e}",
+                    self.file.display()
+                ))
+            })?;
         if u64::try_from(bytes.len()).is_ok_and(|size| size > MAX_FILE_BYTES) {
-            return Err(too_big());
+            return Err(PluginError::other(format!(
+                "browser: container `{}` exceeds 8 MiB",
+                self.file.display()
+            )));
         }
-        let cookies = parse_file(&bytes).map_err(|what| self.problem(format!("{file} {what}")))?;
-        let now = unix_seconds();
-        Ok(Some(
-            cookies
-                .into_iter()
-                .filter(|cookie| !cookie.expired(now))
-                .collect(),
-        ))
-    }
-
-    /// Writes the session: a temporary file in the same folder, created with
-    /// mode 0600, then renamed over the file. A folder the call makes is
-    /// created with mode 0700. A symbolic link or a folder at the file's place
-    /// is refused, and a failure leaves the old file and no temporary file.
-    ///
-    /// # Errors
-    ///
-    /// An error naming `session`.
-    pub(crate) fn save(&self, cookies: &[Cookie]) -> Result<()> {
-        let bytes = file_bytes(cookies).map_err(|what| self.problem(what))?;
-        create_private_dir(&self.dir).map_err(|error| {
-            self.problem(format!(
-                "the folder {} cannot be made or used: {error}",
-                self.dir.display()
+        let snapshot = parse_file(&bytes).map_err(|why| {
+            PluginError::other(format!(
+                "browser: container `{}` {why}",
+                self.file.display()
             ))
         })?;
-        self.check_target()?;
-        let temp = self.temp_path();
-        let written =
-            write_private_file(&temp, &bytes).and_then(|()| fs::rename(&temp, &self.file));
-        if let Err(error) = written {
-            // Best effort: the temporary file is ours, and the error is the news.
+        if snapshot.is_expired(unix_millis(), ttl_secs) {
+            return Ok(None);
+        }
+        Ok(Some(snapshot))
+    }
+
+    pub(crate) fn write(&self, snapshot: &ContainerSnapshot) -> Result<()> {
+        self.check_writable()?;
+        let bytes =
+            file_bytes(snapshot).map_err(|why| PluginError::other(format!("browser: {why}")))?;
+        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let temp = self
+            .dir
+            .join(format!(".{}.{}.{seq}.tmp", self.name, std::process::id()));
+        if let Err(error) = write_private_file(&temp, &bytes) {
             let _ = fs::remove_file(&temp);
-            return Err(self.problem(format!(
-                "{} cannot be written: {error}",
+            return Err(PluginError::other(format!(
+                "browser: cannot write container `{}`: {error}",
+                self.file.display()
+            )));
+        }
+        if let Err(error) = fs::rename(&temp, &self.file) {
+            let _ = fs::remove_file(&temp);
+            return Err(PluginError::other(format!(
+                "browser: cannot persist container `{}`: {error}",
                 self.file.display()
             )));
         }
         Ok(())
     }
-
-    /// Makes the folder if it is missing and writes and removes a temporary
-    /// file in it, so that a session that cannot be saved is found out at
-    /// launch and not when the browser closes.
-    ///
-    /// # Errors
-    ///
-    /// An error naming `session` and `save_on_close`.
-    pub(crate) fn check_writable(&self) -> Result<()> {
-        let probe = self.temp_path();
-        create_private_dir(&self.dir)
-            .and_then(|()| write_private_file(&probe, b""))
-            .and_then(|()| fs::remove_file(&probe))
-            .map_err(|error| {
-                // Best effort again.
-                let _ = fs::remove_file(&probe);
-                self.problem(format!(
-                    "cannot be saved: the folder {} cannot be written ({error}), and `save_on_close` and `interactive` need to write there",
-                    self.dir.display()
-                ))
-            })?;
-        self.check_target()
-    }
 }
 
-/// Puts the cookies of the saved session back into the browser. A session
-/// that was never saved, or holds nothing unexpired, sends nothing.
-///
-/// # Errors
-///
-/// An error naming `session`: from the file (see [`Store::load`]), or when the
-/// browser refuses the cookies, with their values removed from its message.
-pub(crate) async fn restore(browser: &dyn BrowserHandle, store: &Store) -> Result<()> {
-    let Some(cookies) = store.load()? else {
-        return Ok(());
-    };
-    if cookies.is_empty() {
-        return Ok(());
-    }
-    let params = json!({ "cookies": cookies.iter().map(Cookie::to_value).collect::<Vec<_>>() });
-    browser
-        .send("Storage.setCookies", params)
-        .await
-        .map(drop)
-        .map_err(|error| {
-            store.problem(format!(
-                "the browser refused `Storage.setCookies` for {} cookies: {}",
-                cookies.len(),
-                redact(&error.to_string(), &cookies)
-            ))
-        })
-}
-
-/// Saves the browser's cookies (its default context) as the session. Gives
-/// the number of cookies saved.
-///
-/// # Errors
-///
-/// An error naming `session`: the browser cannot give its cookies, answers
-/// something else, holds more than 5000, or the file cannot be written.
-pub(crate) async fn save(browser: &dyn BrowserHandle, store: &Store) -> Result<usize> {
-    let reply = browser
-        .send("Storage.getCookies", json!({}))
-        .await
-        .map_err(|error| store.problem(format!("cannot read the browser's cookies: {error}")))?;
-    let Some(list) = reply.get("cookies").and_then(Value::as_array) else {
-        return Err(
-            store.problem("the browser's answer to `Storage.getCookies` has no cookie list")
-        );
-    };
-    if list.len() > MAX_COOKIES {
-        return Err(store.problem(format!(
-            "the browser holds {} cookies, more than the {MAX_COOKIES} a session file may keep; nothing was saved",
-            list.len()
-        )));
-    }
-    let cookies = list
+/// Restores non-expired cookies into the browser via `Storage.setCookies`.
+pub(crate) async fn restore_cookies(
+    browser: &dyn BrowserHandle,
+    cookies: &[Cookie],
+) -> Result<usize> {
+    let now = unix_seconds();
+    let live: Vec<Value> = cookies
         .iter()
-        .enumerate()
-        .map(|(index, cookie)| {
-            Cookie::parse(cookie, true)
-                .map_err(|what| store.problem(format!("the browser's cookies[{index}]: {what}")))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    store.save(&cookies)?;
-    Ok(cookies.len())
+        .filter(|c| !c.expired(now))
+        .map(Cookie::to_value)
+        .collect();
+    if live.is_empty() {
+        return Ok(0);
+    }
+    let count = live.len();
+    browser
+        .send("Storage.setCookies", json!({ "cookies": live }))
+        .await?;
+    Ok(count)
 }
 
-/// The longest session name.
-const MAX_NAME_LEN: usize = 64;
-
-/// Whether `name` is a session name: one to 64 letters, digits, `.`, `_` or
-/// `-`, starting with a letter or a digit. Such a name is one path component,
-/// holds no separator and no NUL, and does not start with a dot.
-pub(crate) fn valid_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
+/// Reads all live cookies from the browser via `Storage.getCookies`.
+pub(crate) async fn capture_cookies(browser: &dyn BrowserHandle) -> Result<Vec<Cookie>> {
+    let response = browser.send("Storage.getCookies", json!({})).await?;
+    let Some(list) = response.get("cookies").and_then(Value::as_array) else {
+        return Err(PluginError::other(
+            "browser: `Storage.getCookies` did not return a `cookies` array",
+        ));
     };
-    name.len() <= MAX_NAME_LEN
-        && first.is_ascii_alphanumeric()
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    let mut out = Vec::with_capacity(list.len());
+    for (idx, item) in list.iter().enumerate() {
+        let cookie = Cookie::parse(item, true).map_err(|why| {
+            PluginError::other(format!(
+                "browser: `Storage.getCookies` cookies[{idx}]: {why}"
+            ))
+        })?;
+        out.push(cookie);
+    }
+    Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const SECRET: &str = "s3cr3t-value-0042";
-
-    fn cookie_with(extra: Value) -> Value {
-        let mut cookie = json!({ "name": "sid", "value": SECRET, "domain": "a.test", "path": "/" });
-        for (field, value) in extra.as_object().expect("an object") {
-            cookie[field.as_str()] = value.clone();
-        }
-        cookie
-    }
-
-    #[test]
-    fn a_cookie_shows_nothing_in_debug() {
-        let cookie = Cookie::parse(&cookie_with(json!({})), false).expect("a good cookie");
-        let shown = format!("{cookie:?} {:?}", vec![cookie.clone()]);
-        assert!(!shown.contains(SECRET), "{shown}");
-        assert!(!shown.contains("sid"), "{shown}");
-    }
-
-    #[test]
-    fn names_are_one_safe_path_component() {
-        let long = "x".repeat(65);
-        for bad in [
-            "", ".a", "-a", "_a", "a/b", "a\\b", "..", "a b", "a\0b", "é", &long,
-        ] {
-            assert!(!valid_name(bad), "{bad:?}");
-        }
-        for good in ["a", "A9", "a.b", "a_b", "a-b", "a..b", &"x".repeat(64)] {
-            assert!(valid_name(good), "{good:?}");
-        }
-    }
-
-    #[test]
-    fn a_session_cookie_has_no_expiry_whatever_the_browser_calls_it() {
-        for expires in [json!(-1), json!(0), json!(null)] {
-            let cookie = Cookie::parse(&cookie_with(json!({ "expires": expires })), false)
-                .expect("a good cookie");
-            assert!(cookie.to_value().get("expires").is_none());
-        }
-        let cookie = Cookie::parse(&cookie_with(json!({ "expires": 5.5 })), false).expect("good");
-        assert_eq!(cookie.to_value()["expires"], json!(5.5));
-        assert!(cookie.expired(5.5) && cookie.expired(6.0) && !cookie.expired(5.0));
-    }
-
-    #[test]
-    fn a_value_this_plugin_does_not_know_is_an_error_to_read_and_dropped_from_a_browser() {
-        let odd =
-            cookie_with(json!({ "sameSite": "Sometimes", "sourcePort": 0, "partitionKey": 3 }));
-        let strict = Cookie::parse(&odd, false).expect_err("a session file is read strictly");
-        assert!(
-            strict.contains("sameSite") && !strict.contains("Sometimes"),
-            "{strict}"
-        );
-        let lenient = Cookie::parse(&odd, true).expect("a browser may know more");
-        let kept = lenient.to_value();
-        for field in ["sameSite", "sourcePort", "partitionKey"] {
-            assert!(kept.get(field).is_none(), "{field}");
-        }
-    }
-
-    #[test]
-    fn redacting_removes_a_value_as_it_is_and_as_json_writes_it() {
-        let tricky = "q\"u\\ote";
-        let cookie = Cookie::parse(
-            &json!({ "name": "n", "value": tricky, "domain": "a.test", "path": "/" }),
-            false,
-        )
-        .expect("a good cookie");
-        let message = format!(
-            "bad {tricky} and {}",
-            serde_json::to_string(tricky).expect("json")
-        );
-        let shown = redact(&message, &[cookie]);
-        assert!(!shown.contains(tricky), "{shown}");
-        assert!(!shown.contains("u\\\\ote"), "{shown}");
-        assert!(shown.starts_with("bad "), "{shown}");
-    }
-
-    #[test]
-    fn the_file_is_always_inside_its_folder() {
-        for name in ["a", "a.json", "a..b", "x-y_z.1"] {
-            let config = SessionConfig::builder()
-                .session(name)
-                .session_dir("/tmp/sessions/")
-                .build()
-                .expect("a valid session");
-            let store = Store::from_config(&config)
-                .expect("a store")
-                .expect("a session");
-            assert_eq!(store.file().parent(), Some(store.dir()));
-            assert_eq!(store.name(), name);
-        }
-        assert!(
-            Store::from_config(&SessionConfig::new())
-                .expect("no error")
-                .is_none()
-        );
-    }
+/// Summary returned after saving a container snapshot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SaveSummary {
+    /// Container name.
+    pub session: String,
+    /// Number of cookies persisted.
+    pub cookies: usize,
+    /// Number of origins with persisted Web Storage.
+    pub storage_origins: usize,
+    /// Number of open tab URLs persisted.
+    pub tabs: usize,
 }

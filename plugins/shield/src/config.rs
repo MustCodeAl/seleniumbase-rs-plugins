@@ -3,6 +3,9 @@
 use seleniumbase_rs_plugin::PluginError;
 use serde::Deserialize;
 
+#[cfg(feature = "tor")]
+use crate::tor::TorConfig;
+
 /// How much of the browser's own background traffic shield cuts off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -30,20 +33,36 @@ pub enum WebRtcMode {
     RelayOnly,
 }
 
+/// Deserializes `tor` as `false`/`null` (`None`), `true` (`Some(TorConfig::default())`),
+/// or a `[plugins.shield.tor]` table (`Some(TorConfig)`).
+#[cfg(feature = "tor")]
+fn deserialize_tor<'de, D>(deserializer: D) -> Result<Option<TorConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum TorOption {
+        Bool(bool),
+        Config(TorConfig),
+    }
+
+    match Option::<TorOption>::deserialize(deserializer)? {
+        None | Some(TorOption::Bool(false)) => Ok(None),
+        Some(TorOption::Bool(true)) => Ok(Some(TorConfig::default())),
+        Some(TorOption::Config(cfg)) => Ok(Some(cfg)),
+    }
+}
+
 /// The options of [`Shield`](crate::Shield): `[plugins.shield]` in a config
 /// file, `--plugin-opt 'shield.level="strict"'` on the command line.
 ///
+/// Enable Tor routing with `tor = true` (default local daemon at `127.0.0.1:9050`)
+/// or a `[plugins.shield.tor]` table configuring `socks`, `control`,
+/// `control_auth`, `isolation`, and `require_bootstrapped`.
+///
 /// An option that is not listed here is an error, so a typo does not turn a
 /// protection off without a word.
-///
-/// Two options do nothing yet, because the hooks they need are not part of the
-/// plugin API yet: [`sweep_stale_profiles`] and [`clear_between_tests`]. Both
-/// default to `false`, and turning either on is a [`PluginError::Config`]
-/// error until the hooks exist, so no one believes a protection is running
-/// that is not.
-///
-/// [`sweep_stale_profiles`]: Self::sweep_stale_profiles
-/// [`clear_between_tests`]: Self::clear_between_tests
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]
@@ -59,23 +78,23 @@ pub struct ShieldConfig {
     /// sets one fails with a message instead of keeping state on disk.
     pub ephemeral_profile: bool,
     /// Delete the profile folders of dead browsers that earlier runs left in
-    /// the temporary folder. Default `false`. **Not active yet**: it needs a
-    /// host file API that the plugin API does not have, so `true` is refused.
+    /// the temporary folder. Default `false`. **Not active yet**: `true` is refused.
     pub sweep_stale_profiles: bool,
     /// Clear the storage of every origin a test visited when the test ends.
-    /// Default `false` (the design's default is `true`; it changes when this
-    /// works). **Not active yet**: it needs the test hooks and the response hook
-    /// of a later plugin API, so `true` is refused.
+    /// Default `false`. **Not active yet**: `true` is refused.
     pub clear_between_tests: bool,
     /// Host names whose requests pages may not make, with their subdomains,
-    /// such as `tracker.example.com`. Host names only: no scheme, port, path or
-    /// `*`.
+    /// such as `tracker.example.com`. Host names only: no scheme, port, path or `*`.
     pub extra_block_hosts: Vec<String>,
     /// Leave Safe Browsing on. Default `true`. Only `false` makes shield turn
-    /// it off. No [`Level`] sets a Safe Browsing preference or blocks its hosts;
-    /// what Chromium's own `--disable-background-networking` does to Safe
-    /// Browsing list updates was not checked.
+    /// it off.
     pub safe_browsing: bool,
+    /// Optional Tor SOCKS5 routing and per-context circuit isolation through a
+    /// local Tor daemon (`feature = "tor"`). Accepts `true`, `false`, or a
+    /// [`TorConfig`] object. Default `None`.
+    #[cfg(feature = "tor")]
+    #[serde(default, deserialize_with = "deserialize_tor")]
+    pub tor: Option<TorConfig>,
 }
 
 impl Default for ShieldConfig {
@@ -89,6 +108,8 @@ impl Default for ShieldConfig {
             clear_between_tests: false,
             extra_block_hosts: Vec::new(),
             safe_browsing: true,
+            #[cfg(feature = "tor")]
+            tor: None,
         }
     }
 }
@@ -147,13 +168,30 @@ impl ShieldConfig {
         self
     }
 
+    /// Enables Tor routing with default local daemon settings (`127.0.0.1:9050`,
+    /// per-context circuit isolation).
+    #[cfg(feature = "tor")]
+    #[must_use]
+    pub fn with_tor(mut self) -> Self {
+        self.tor = Some(TorConfig::default());
+        self
+    }
+
+    /// Enables Tor routing with explicit [`TorConfig`] options.
+    #[cfg(feature = "tor")]
+    #[must_use]
+    pub fn tor(mut self, config: TorConfig) -> Self {
+        self.tor = Some(config);
+        self
+    }
+
     /// Checks the options and lower-cases the host names.
     ///
     /// # Errors
     ///
     /// [`PluginError::Config`] when a host name in `extra_block_hosts` is not a
-    /// plain ASCII host name, or when `sweep_stale_profiles` or
-    /// `clear_between_tests` is on (they are not implemented yet).
+    /// plain ASCII host name, when `sweep_stale_profiles` or
+    /// `clear_between_tests` is on, or when `tor` options are invalid.
     pub(crate) fn normalized(mut self) -> Result<Self, PluginError> {
         for (name, on) in [
             ("sweep_stale_profiles", self.sweep_stale_profiles),
@@ -172,6 +210,10 @@ impl ShieldConfig {
         let mut seen = std::collections::BTreeSet::new();
         self.extra_block_hosts
             .retain(|host| seen.insert(host.clone()));
+        #[cfg(feature = "tor")]
+        if let Some(ref tor) = self.tor {
+            tor.validate()?;
+        }
         Ok(self)
     }
 }
@@ -225,5 +267,24 @@ mod tests {
             config.normalized().unwrap().extra_block_hosts,
             ["b.example", "a.example"]
         );
+    }
+
+    #[cfg(feature = "tor")]
+    #[test]
+    fn tor_deserializes_from_bool_or_object() {
+        let off: ShieldConfig =
+            serde_json::from_value(serde_json::json!({ "tor": false })).unwrap();
+        assert!(off.tor.is_none());
+
+        let default_on: ShieldConfig =
+            serde_json::from_value(serde_json::json!({ "tor": true })).unwrap();
+        assert_eq!(default_on.tor, Some(TorConfig::default()));
+
+        let custom: ShieldConfig = serde_json::from_value(serde_json::json!({
+            "tor": { "socks": "127.0.0.1:9150", "isolation": "browser" }
+        }))
+        .unwrap();
+        let tor = custom.tor.unwrap();
+        assert_eq!(tor.socks.port(), 9150);
     }
 }

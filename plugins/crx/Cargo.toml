@@ -1,14 +1,16 @@
 [package]
 name = "seleniumbase-rs-plugin-crx"
-description = "A seleniumbase-rs plugin that loads packed Chrome extensions (.crx files)"
+description = "The seleniumbase-rs browser extension plugin: loads .crx, .zip, and unpacked Manifest V3 extensions with service-worker waits"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["seleniumbase-rs", "plugin", "extensions", "crx", "chromium"]
 
 [dependencies]
 seleniumbase-rs-plugin.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tempfile = "3.27"
 zip = { version = "9.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

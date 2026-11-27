@@ -1,82 +1,153 @@
-//! A seleniumbase-rs plugin that loads packed Chrome extensions (`.crx` files).
+//! The single seleniumbase-rs plugin for loading Chromium browser extensions
+//! from `.crx` (CRX3 and CRX2), `.zip`, and unpacked Manifest V3 folders, with
+//! optional service-worker readiness waits.
 //!
-//! Chrome only loads unpacked extension folders from the command line. This
-//! plugin takes `.crx` files (CRX3, the current format, and the older CRX2),
-//! strips the signed header, unpacks the zip into a temporary folder and adds
-//! the folder to the browser's start-up settings. The folders are deleted when
-//! the browser closes.
+//! Packed archives are unpacked into per-launch temporary directories (prefix
+//! `sbrs-crx-`, deleted when the browser closes) with zip-bomb (512 MiB) and
+//! path-traversal guards. Unpacked directories are loaded in place and never
+//! modified.
 //!
-//! The signature in the header is **not** verified: load only files you trust,
-//! as you would install them by hand.
+//! The cryptographic signature in a `.crx` header is **not** verified: load
+//! only extensions you trust.
 //!
 //! ```no_run
 //! use seleniumbase_rs_plugin::PluginSet;
-//! use seleniumbase_rs_plugin_crx::CrxExtensions;
+//! use seleniumbase_rs_plugin_crx::{CrxConfig, CrxExtensions};
 //!
-//! let plugins = PluginSet::new().with(CrxExtensions::new(["extensions/dark-reader.crx"]))?;
+//! let config = CrxConfig::builder()
+//!     .zip("extensions/dark-reader.crx")
+//!     .dir("my-unpacked-extension")
+//!     .wait_for_workers(true)
+//!     .build()?;
+//! let plugins = PluginSet::strict().with(CrxExtensions::from_config(config)?)?;
+//! assert_eq!(plugins.names(), ["crx"]);
 //! # Ok::<(), seleniumbase_rs_plugin::PluginError>(())
 //! ```
 
+mod config;
+mod source;
+mod workers;
+
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
+use seleniumbase_rs_plugin::config::options;
 use seleniumbase_rs_plugin::{
-    Capability, Category, Configurable, LaunchSettings, Metadata, PathScope, Plugin, PluginError,
-    Requirements, Result, async_trait,
+    BrowserHandle, Budgets, Capability, Category, Configurable, LaunchSettings, Metadata,
+    PathScope, Plugin, PluginError, Requirements, Result, async_trait,
 };
 use tempfile::TempDir;
+
+pub use config::{CrxConfig, CrxConfigBuilder};
+
+/// Plugin name in [`PluginSet`](seleniumbase_rs_plugin::PluginSet) and CLI flags.
+const NAME: &str = "crx";
 
 /// Unpacked archives above this size are refused, as a guard against zip bombs.
 const MAX_UNPACKED: u64 = 512 * 1024 * 1024;
 
-impl Configurable for CrxExtensions {
-    const NAME: &'static str = "crx";
-
-    fn describe() -> Metadata {
-        Metadata::new(Category::Extension)
-            .version(env!("CARGO_PKG_VERSION"))
-            .summary("Loads .crx extension files into the browser it starts")
-            .capability(Capability::LaunchExtensions)
-            .capability(Capability::HostFsWrite(PathScope::Temp))
-    }
-
-    /// Options: `files`, an array of `.crx` paths.
-    fn configure(options: &serde_json::Value) -> Result<Self> {
-        let files = options
-            .get("files")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|items| items.iter().map(|v| v.as_str()).collect::<Option<Vec<_>>>())
-            .ok_or_else(|| PluginError::Config("`files` must be an array of paths".into()))?;
-        Ok(Self::new(files))
-    }
+fn wait_budgets(seconds: u64) -> Budgets {
+    let mut budgets = Budgets::default();
+    budgets.other = Some(Duration::from_secs(seconds) + workers::HOOK_HEADROOM);
+    budgets
 }
 
-/// Loads `.crx` files into the browser it starts.
+fn asks_for_old_headless(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| arg.trim_start_matches('-') == "headless=old")
+}
+
+/// Loads Chromium extensions from `.crx`, `.zip`, and unpacked folders.
 #[derive(Debug)]
 pub struct CrxExtensions {
-    files: Vec<PathBuf>,
+    config: CrxConfig,
     unpacked: Mutex<Vec<TempDir>>,
+    workers: Mutex<Vec<source::Worker>>,
 }
 
 impl CrxExtensions {
-    /// Loads these `.crx` files.
+    /// Creates a plugin that loads these `.crx` / `.zip` archive paths.
+    ///
+    /// Keeps backward compatibility with legacy callers passing `.crx` files
+    /// directly (Manifest V3 enforcement is relaxed unless built with
+    /// [`from_config`](Self::from_config)).
     pub fn new<I, P>(files: I) -> Self
     where
         I: IntoIterator<Item = P>,
         P: Into<PathBuf>,
     {
-        Self {
+        let config = CrxConfig {
             files: files.into_iter().map(Into::into).collect(),
+            require_manifest_v3: false,
+            ..CrxConfig::default()
+        };
+        Self::checked(config)
+    }
+
+    /// Creates a plugin from a validated [`CrxConfig`].
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Config`] when any option in `config` is invalid.
+    pub fn from_config(config: CrxConfig) -> Result<Self> {
+        config.check()?;
+        Ok(Self::checked(config))
+    }
+
+    fn checked(config: CrxConfig) -> Self {
+        Self {
+            config,
             unpacked: Mutex::new(Vec::new()),
+            workers: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Returns the configuration this plugin was built with.
+    #[must_use]
+    pub fn config(&self) -> &CrxConfig {
+        &self.config
+    }
+
+    fn unpacked(&self) -> MutexGuard<'_, Vec<TempDir>> {
+        self.unpacked.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn workers(&self) -> MutexGuard<'_, Vec<source::Worker>> {
+        self.workers.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl Configurable for CrxExtensions {
+    const NAME: &'static str = NAME;
+
+    fn describe() -> Metadata {
+        Metadata::new(Category::Extension)
+            .version(env!("CARGO_PKG_VERSION"))
+            .summary("Loads Chromium extensions from .crx, .zip, and unpacked Manifest V3 folders")
+            .capability(Capability::LaunchExtensions)
+            .optional(Capability::HostFsWrite(PathScope::Temp))
+            .optional(Capability::Clock)
+    }
+
+    /// Options: `files`, `extension_zip`, `extension_dir`, `wait_for_workers`,
+    /// `worker_timeout_secs`, `require_manifest_v3`. `Value::Null` yields an
+    /// empty configuration.
+    fn configure(value: &serde_json::Value) -> Result<Self> {
+        let config = if value.is_null() {
+            CrxConfig::new()
+        } else {
+            options::<CrxConfig>(NAME, value)?
+        };
+        Self::from_config(config)
     }
 }
 
 #[async_trait]
 impl Plugin for CrxExtensions {
     fn name(&self) -> &str {
-        "crx"
+        NAME
     }
 
     fn requirements(&self) -> Requirements {
@@ -84,48 +155,65 @@ impl Plugin for CrxExtensions {
     }
 
     fn metadata(&self) -> Metadata {
-        Self::describe().capability(Capability::HostFsRead(PathScope::Declared(
-            self.files.clone(),
-        )))
+        let mut meta = Metadata::new(Category::Extension)
+            .version(env!("CARGO_PKG_VERSION"))
+            .summary("Loads Chromium extensions from .crx, .zip, and unpacked Manifest V3 folders")
+            .capability(Capability::LaunchExtensions);
+        if self.config.has_archives() {
+            meta = meta.capability(Capability::HostFsWrite(PathScope::Temp));
+        }
+        let reads = self.config.sources();
+        if !reads.is_empty() {
+            meta = meta.capability(Capability::HostFsRead(PathScope::Declared(reads)));
+        }
+        if self.config.wait_for_workers {
+            meta = meta
+                .capability(Capability::Clock)
+                .budget(wait_budgets(self.config.worker_timeout_secs_or_default()));
+        }
+        meta
     }
 
-    /// A fresh instance for each browser, so closing one pooled browser does
-    /// not delete the unpacked folders of the others.
     fn per_launch(&self) -> Option<Arc<dyn Plugin>> {
-        Some(Arc::new(Self::new(self.files.clone())))
+        Some(Arc::new(Self::checked(self.config.clone())))
     }
 
     async fn before_launch(&self, launch: &mut LaunchSettings) -> Result<()> {
-        for file in &self.files {
-            let bytes = std::fs::read(file).map_err(|error| {
-                PluginError::other(format!("cannot read {}: {error}", file.display()))
-            })?;
-            let dir = tempfile::Builder::new()
-                .prefix("sbrs-crx-")
-                .tempdir()
-                .map_err(|error| {
-                    PluginError::other(format!(
-                        "cannot make a folder for {}: {error}",
-                        file.display()
-                    ))
-                })?;
-            unpack(&bytes, dir.path())
-                .map_err(|error| PluginError::other(format!("{}: {error}", file.display())))?;
-            launch.extensions.push(dir.path().to_path_buf());
-            self.unpacked
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(dir);
+        if self.config.is_empty() {
+            return Ok(());
         }
+        if asks_for_old_headless(&launch.args) {
+            return Err(PluginError::other(
+                "crx: extensions do not load under `--headless=old`; use `--headless=new` or headed mode",
+            ));
+        }
+        let prepared = source::prepare(&self.config, &std::env::temp_dir())?;
+        for folder in prepared.folders {
+            if !launch.extensions.contains(&folder) {
+                launch.extensions.push(folder);
+            }
+        }
+        self.unpacked().extend(prepared.temps);
+        *self.workers() = prepared.workers;
         Ok(())
     }
 
+    async fn on_browser(&self, browser: &dyn BrowserHandle) -> Result<()> {
+        if !self.config.wait_for_workers {
+            return Ok(());
+        }
+        let wanted = self.workers().clone();
+        workers::wait(
+            browser,
+            &wanted,
+            self.config.worker_timeout_secs_or_default(),
+        )
+        .await
+    }
+
     async fn on_close(&self) -> Result<()> {
-        // Dropping the folders deletes them.
-        self.unpacked
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        self.unpacked().clear();
+        self.workers().clear();
         Ok(())
     }
 }
@@ -166,9 +254,7 @@ pub fn archive(crx: &[u8]) -> std::result::Result<&[u8], CrxError> {
         return Err(CrxError::NotCrx("it does not start with `Cr24`".into()));
     }
     let start = match word(4)? {
-        // Version 3: one length for the signed header.
         3 => 12usize.checked_add(word(8)?),
-        // Version 2: a public key and a signature, each with its length.
         2 => 16usize
             .checked_add(word(8)?)
             .and_then(|n| n.checked_add(word(12).ok()?)),
@@ -183,8 +269,7 @@ pub fn archive(crx: &[u8]) -> std::result::Result<&[u8], CrxError> {
 ///
 /// # Errors
 ///
-/// [`CrxError`] when the file is not a CRX file or its archive cannot be
-/// unpacked.
+/// [`CrxError`] when the file is not a CRX file or its archive cannot be unpacked.
 pub fn unpack(crx: &[u8], dest: &Path) -> std::result::Result<(), CrxError> {
     let archive_error = |error: &dyn std::fmt::Display| CrxError::Archive(error.to_string());
     let mut zip =
@@ -296,7 +381,58 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_adds_the_unpacked_folder_and_deletes_it_on_close() {
+    fn loads_crx_zip_and_unpacked_mv3_and_cleans_up_on_close() {
+        let source = tempfile::tempdir().unwrap();
+        let mv3 = r#"{"manifest_version":3,"name":"demo","version":"1.0"}"#;
+        let crx_file = source.path().join("ext.crx");
+        std::fs::write(&crx_file, crx3(&zip_with(&[("manifest.json", mv3)]))).unwrap();
+        let zip_file = source.path().join("ext.zip");
+        std::fs::write(&zip_file, zip_with(&[("manifest.json", mv3)])).unwrap();
+        let unpacked_dir = source.path().join("unpacked");
+        std::fs::create_dir(&unpacked_dir).unwrap();
+        std::fs::write(unpacked_dir.join("manifest.json"), mv3).unwrap();
+
+        let cfg = CrxConfig::builder()
+            .zip(&crx_file)
+            .zip(&zip_file)
+            .dir(&unpacked_dir)
+            .build()
+            .unwrap();
+        let plugin = CrxExtensions::from_config(cfg).unwrap();
+        let mut launch = LaunchSettings::default();
+        block_on(plugin.before_launch(&mut launch)).unwrap();
+        assert_eq!(launch.extensions.len(), 3);
+        let temp_a = launch.extensions[0].clone();
+        let temp_b = launch.extensions[1].clone();
+        assert!(temp_a.join("manifest.json").is_file());
+        assert!(temp_b.join("manifest.json").is_file());
+
+        block_on(plugin.on_close()).unwrap();
+        assert!(!temp_a.exists());
+        assert!(!temp_b.exists());
+        assert!(unpacked_dir.exists());
+    }
+
+    #[test]
+    fn refuses_manifest_v2_when_mv3_required() {
+        let source = tempfile::tempdir().unwrap();
+        let dir = source.path().join("mv2");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"manifest_version":2,"name":"old","version":"1.0"}"#,
+        )
+        .unwrap();
+
+        let cfg = CrxConfig::builder().dir(&dir).build().unwrap();
+        let plugin = CrxExtensions::from_config(cfg).unwrap();
+        let mut launch = LaunchSettings::default();
+        let err = block_on(plugin.before_launch(&mut launch)).unwrap_err();
+        assert!(err.to_string().contains("Manifest V3"), "{err}");
+    }
+
+    #[test]
+    fn legacy_new_still_works_with_crx_files() {
         let source = tempfile::tempdir().unwrap();
         let file = source.path().join("ext.crx");
         std::fs::write(&file, crx3(&zip_with(&[("manifest.json", "{}")]))).unwrap();

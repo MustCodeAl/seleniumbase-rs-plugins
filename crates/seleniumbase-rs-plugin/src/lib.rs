@@ -134,6 +134,8 @@ mod host;
 mod metadata;
 mod order;
 pub mod switch_policy;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 use std::fmt;
 use std::path::PathBuf;

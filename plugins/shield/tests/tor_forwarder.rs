@@ -1,18 +1,19 @@
+#![cfg(feature = "tor")]
 //! The forwarder against a fake Tor SocksPort: what Tor is sent, that a name
 //! reaches it unresolved, that the target is never dialled, and that bad
 //! input, load and shutdown are handled.
 
-mod support;
+mod tor_support;
 
 use std::time::{Duration, Instant};
 
-use seleniumbase_rs_plugin_tor::{Forwarder, IsolationToken, Limits};
-use support::{
+use seleniumbase_rs_plugin_shield::tor::{Forwarder, IsolationToken, Limits};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
+use tor_support::{
     Answer, CountingListener, FakeSocksUpstream, dead_address, expect_closed, open, read_n,
     request_name, request_v4, run, wait_for,
 };
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 
 const TOKEN: [u8; 16] = [0x11; 16];
 
